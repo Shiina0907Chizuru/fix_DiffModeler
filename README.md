@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 # DiffModeler
 <a href="https://github.com/marktext/marktext/releases/latest">
@@ -405,3 +406,6 @@ DiffModeler.cif: a CIF file that records the final modeled protein complex struc
 Our example output can be found [here](https://kiharalab.org/emsuites/diffmodelder_example/output). All the intermediate results are also kept here. 
 
 </details>
+=======
+# fix_DiffModeler
+>>>>>>> 3a13d8e44c295b56cbb4ebb8524069ac2bb44d0c
