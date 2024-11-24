@@ -1,0 +1,82 @@
+
+
+{
+    "phase": "infer",
+    "fasta_thread": 4,
+    "search_thread": 8,
+    "SWORD_thread": 8,
+    "email": "wang3702@purdue.edu",
+    "db_exp_path": "data/rcsb.db",
+    "db_path": "data/rcsb_afdb.db",//for server usage, remove dependency on EBI's API
+    "model": {
+      "path": "best_model/diffusion_best.pth.tar",
+      "unet": {
+            "in_channel": 3,
+            "out_channel": 1,
+            "inner_channel": 32,
+            "norm_groups": 16,
+            "channel_multiplier": [
+                1,
+                2,
+                4,
+                8,
+                8 //waiting to be adjusted if box size adjusted to 32.
+            ],
+            "attn_res": [
+                8 //if not use, we can change to any number out of numbers in "channel_multiplier"
+            ],
+            "res_blocks": 2,
+            "dropout": 0.0
+        },
+      "diffusion": {
+            "box_size": 64,
+            "stride": 32, //to save time, for better performance, you can choose 16.
+            "channels": 1, //sample channel for denoising
+            "loss_type": "solo_dens",
+            "conditional": true // unconditional generation or unconditional generation(super_resolution)
+        },
+      "beta_schedule": { // use munual beta_schedule for acceleration
+            "train": {
+                "n_timestep": 100,
+                "infer_clip":1
+            },
+            "val": {
+                 "n_timestep": 100,
+                "infer_clip":1
+            }
+        },
+      "batch_size": 4,
+      "num_workers": 4
+    },
+    "LDP": {
+      "threshold": 0.01,
+      "g": 2,//Bandwidth of the Gaussian filter, (Float), Default value: 2.0.
+      "m": 1.0,//After meanshifting merge points distance<[float]. (Float), Default value: 1.0.
+      "f": 0.05 //Filter for representative points, for LDPs, removing points' normalized density<=-f (Float), Default value: 0.0
+    },
+    "vesper": {
+      "ldp_cutoff": 0.05,
+      "simu_cutoff": 0.01,
+      "kernel_size": 2,
+      "voxel_spacing": 2,
+      "angle_spacing": 10,
+      "num_models": 100,
+      "local_num_models": 1,
+      "rank_mode": "C",
+      "thread": 6,
+      "local_angle_range": 20,
+      "local_angle_spacing": 1
+    },
+    "assembling": {
+      "score_cutoff": 0.2,
+      "score_min_cutoff": 50,
+      "score_max_cutoff": 60,
+      "mask_cutoff": 20,
+      "clash_distance": 3,
+        "overlap_ratio_limit": 0.05
+    },
+    "search": {
+      "length_ratio": 0.9,
+      "max_length_ratio": 1.1
+    }
+}
