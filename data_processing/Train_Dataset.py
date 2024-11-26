@@ -70,30 +70,30 @@ class Train_Dataset(torch.utils.data.Dataset):
         input = np.load(inputfile)
         atom_label = np.load(atomfile)
         # print("input:{},atom_label:{}".format(input.shape,atom_label.shape))
-        rot = random.randint(0, 3)
-        axis = random.randint(0, 2)
-        if self.is_train:
-            if len(input.shape) == 3:
-                input = rot90(input, rot, axis)
-                print("input:",input.shape)
-            else:
-                for k in range(len(input)):
-                    # print(k)
-                    # print(len(input))
-                    print("input[k]:",input[k].shape)
-                    input[k] = rot90(input[k], rot, axis)
-            # for k in range(len(atom_label)):
-            #     print("atom_label[k]:",atom_label[k].shape)
-            #     atom_label[k] = rot90(atom_label[k], rot, axis)
-            if len(atom_label.shape) == 3:#fix the bug
-                atom_label = rot90(atom_label, rot, axis)
-                print("atom_label:",atom_label.shape)
-            else:
-                for k in range(len(atom_label)):
-                    # print(k)
-                    # print(len(atom_label))
-                    print("atom_label[k]:",atom_label[k].shape)
-                    atom_label[k] = rot90(atom_label[k], rot, axis)
+        # rot = random.randint(0, 3)
+        # axis = random.randint(0, 2)
+        # if self.is_train:
+        #     if len(input.shape) == 3:
+        #         input = rot90(input, rot, axis)
+        #         print("input:",input.shape)
+        #     else:
+        #         for k in range(len(input)):
+        #             # print(k)
+        #             # print(len(input))
+        #             print("input[k]:",input[k].shape)
+        #             input[k] = rot90(input[k], rot, axis)
+        #     # for k in range(len(atom_label)):
+        #     #     print("atom_label[k]:",atom_label[k].shape)
+        #     #     atom_label[k] = rot90(atom_label[k], rot, axis)
+        #     if len(atom_label.shape) == 3:#fix the bug
+        #         atom_label = rot90(atom_label, rot, axis)
+        #         print("atom_label:",atom_label.shape)
+        #     else:
+        #         for k in range(len(atom_label)):
+        #             # print(k)
+        #             # print(len(atom_label))
+        #             print("atom_label[k]:",atom_label[k].shape)
+        #             atom_label[k] = rot90(atom_label[k], rot, axis)
 
         # change aimset to 0, 1 filling by adding channels
         if len(input.shape) == 3:  # (D, H, W)

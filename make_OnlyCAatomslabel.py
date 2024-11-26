@@ -62,7 +62,7 @@ def assign_label_special(map_data, mapc, mapr, maps, origin ,nxstart,nystart,nzs
         if count_check%100==0:
             print("Calcu finished %d/%d"%(count_check,len(cif_info_dict)))
     return distance_array,output_atom_label
-    
+
 
 
 def assign_label_closest_voxel(map_data, mapc, mapr, maps, origin, cif_info_dict):
@@ -121,9 +121,9 @@ def mask_map_by_pdb_slow(input_map_path,output_map_path,final_pdb_output,cutoff=
     # distance_array, output_atom_label = \
                 # assign_label_special(map_data, mapc, mapr, maps, origin,nxstart,nystart,nzstart,  pdb_info_dict)
     distance_array, output_atom_label = \
-                assign_label_closest_voxel(map_data, mapc, mapr, maps, origin,  pdb_info_dict)            
-               
-                
+                assign_label_closest_voxel(map_data, mapc, mapr, maps, origin,  pdb_info_dict)
+
+
     map_data = np.array(map_data)
     # count_meaningful = len(map_data[map_data!=0])
     # count_masked = len(output_atom_label[output_atom_label!=0])
@@ -280,17 +280,20 @@ def format_map(input_map,output_map):
 # final_pdb_output = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler\DATA\3j9p\3j9p.pdb"
 # atom_label_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler\DATA\3j9p\label_closest_voxel.mrc"
 
-# 设置蛋白质名称
-protein_name = "3j22"  # 修改此处的蛋白质名称，例如 "3j22" 或 "8h3r"
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# # 设置蛋白质名称
+# protein_name = "3j9p"  # 修改此处的蛋白质名称，例如 "3j22" 或 "8h3r"
+#
+# # 根据蛋白质名称自动设置路径
+# base_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\DATA"
+# input_map_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\DATA\{protein_name}\processed\{protein_name}_segment.mrc"
+# final_pdb_output = os.path.join(base_path, protein_name, f"{protein_name}.pdb")
+# atom_label_path = os.path.join(base_path, protein_name, "label_closest_voxel.mrc")
+#
+# # 调用函数
+# mask_map_by_pdb_slow(input_map_path, atom_label_path, final_pdb_output, cutoff=2, keep_label=True)
 
-# 根据蛋白质名称自动设置路径
-base_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler\DATA"
-input_map_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler\DATA\{protein_name}\processed\{protein_name}_segment.mrc"
-final_pdb_output = os.path.join(base_path, protein_name, f"{protein_name}.pdb")
-atom_label_path = os.path.join(base_path, protein_name, "label_closest_voxel.mrc")
-
-# 调用函数
-mask_map_by_pdb_slow(input_map_path, atom_label_path, final_pdb_output, cutoff=2, keep_label=True)
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # pdb_info_dict = read_proteinpdb_data(final_pdb_output,run_type=1,atom_cutoff=2)
 # #print(pdb_info_dict)
@@ -300,3 +303,37 @@ mask_map_by_pdb_slow(input_map_path, atom_label_path, final_pdb_output, cutoff=2
 # print(distance_array)
 # mask_map_by_pdb_slow(input_map_path,atom_label_path,final_pdb_output,cutoff=2,keep_label=True)
 # save_label_map(input_map_path,atom_label_path,output_atom_label)
+
+# 集群版本
+def process_from_file(input_file):
+    """
+    从文本文件中读取蛋白质信息并进行掩膜处理。
+    """
+    base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data/mydataset"
+
+    with open(input_file, 'r') as file:
+        for line in file:
+            line = line.strip()
+            if not line or ':' not in line:
+                continue
+
+            try:
+                protein_name, _ = line.split(':')  # 只需要蛋白质名称
+
+                # 设置路径
+                input_map_path = os.path.join(base_path, protein_name, "processed", f"{protein_name}_segment.mrc")
+                final_pdb_output = os.path.join(base_path, protein_name, f"{protein_name}.pdb")
+                atom_label_path = os.path.join(base_path, protein_name, "label_closest_voxel.mrc")
+
+                # 调用掩膜处理函数
+                mask_map_by_pdb_slow(input_map_path, atom_label_path, final_pdb_output, cutoff=2, keep_label=True)
+            except ValueError:
+                print(f"Invalid line format: {line}")
+                continue
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Process protein maps using PDB files.")
+    parser.add_argument("--info_txt", type=str, required=True, help="Path to the input text file containing protein names.")
+    args = parser.parse_args()
+    process_from_file(args.info_txt)

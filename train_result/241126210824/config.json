@@ -46,7 +46,7 @@
     },
     "train": {
         "num_workers": 4,
-        "batch_size": 1, //please adjust it based on your GPU size, should not be smaller than 8. If GPU too small, consider gradient accumulation choice.
+        "batch_size": 4, //please adjust it based on your GPU size, should not be smaller than 8. If GPU too small, consider gradient accumulation choice.
         "epoch": 30,
         "clip_grad": 1,
         "rand_seed": 888,
