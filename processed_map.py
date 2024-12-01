@@ -48,18 +48,23 @@
 #
 #
 # # 设置蛋白质名称
-# protein_name = "3j9p"  # 只需修改此处的蛋白质名称即可，例如 "3j22" 或 "8h3r"
+# protein_name = "8gpr"  # 只需修改此处的蛋白质名称即可，例如 "3j22" 或 "8h3r"
 #
-# # 根据蛋白质名称自动设置路径和轮廓阈值
-# input_map_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\DATA\{protein_name}\emd.map"
-# save_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\DATA\{protein_name}\processed"
+# # # 根据蛋白质名称自动设置路径和轮廓阈值
+# # input_map_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\DATA\{protein_name}\emd.map"
+# # save_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\DATA\{protein_name}\processed"
+#
+# input_map_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\mrc\{protein_name}_map.mrc"
+# save_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\43_proteindataset\{protein_name}\processed"
+# "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\43_proteindataset"
 # map_name = protein_name
 #
 # # 根据蛋白质名称自动设置 contour_level
 # contour_levels = {
 #     "3j9p": 8.0,
 #     "3j22": 1.0,
-#     "8h3r": 0.001
+#     "8h3r": 0.001,
+#     "8gpr": 0.52,
 # }
 # contour_level = contour_levels.get(protein_name, 1.0)  # 默认值为 1.0，如果未找到匹配的名称
 #
@@ -133,9 +138,10 @@ def process_protein(protein_name, contour_level):
     - None
     """
     # 根据蛋白质名称自动设置路径
-    base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data/mydataset"
-    input_map_path = os.path.join(base_path, protein_name, "emd.map")
-    save_path = os.path.join(base_path, protein_name, "processed")
+    base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data"
+    # base_path = "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data"
+    input_map_path = os.path.join(base_path,"mrc",f"{protein_name}_map.mrc")
+    save_path = os.path.join(base_path,"43_proteindataset" , protein_name)
     map_name = protein_name
 
     # 调用预处理函数

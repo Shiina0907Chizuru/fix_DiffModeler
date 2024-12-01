@@ -120,7 +120,7 @@ def process_from_file(input_file):
     """
     从文本文件中读取蛋白质信息并生成数据集。
     """
-    base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data/mydataset"
+    base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data/43_proteindataset"
 
     with open(input_file, 'r') as file:
         for line in file:
@@ -133,8 +133,8 @@ def process_from_file(input_file):
                 contour_level = float(contour_level)
 
                 # 设置路径
-                input_map_path = os.path.join(base_path, protein_name, "processed", f"{protein_name}_segment.mrc")
-                label_map_path = os.path.join(base_path, protein_name, "label_closest_voxel.mrc")
+                input_map_path = os.path.join(base_path, protein_name, f"{protein_name}_segment.mrc")
+                label_map_path = os.path.join(base_path, protein_name, f"{protein_name}_label.mrc")
                 save_dir = os.path.join(base_path, protein_name, "Dataset")
 
                 # 调用数据集生成函数

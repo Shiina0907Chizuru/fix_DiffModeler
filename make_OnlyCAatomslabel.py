@@ -309,7 +309,7 @@ def process_from_file(input_file):
     """
     从文本文件中读取蛋白质信息并进行掩膜处理。
     """
-    base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data/mydataset"
+    base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data"
 
     with open(input_file, 'r') as file:
         for line in file:
@@ -321,9 +321,9 @@ def process_from_file(input_file):
                 protein_name, _ = line.split(':')  # 只需要蛋白质名称
 
                 # 设置路径
-                input_map_path = os.path.join(base_path, protein_name, "processed", f"{protein_name}_segment.mrc")
-                final_pdb_output = os.path.join(base_path, protein_name, f"{protein_name}.pdb")
-                atom_label_path = os.path.join(base_path, protein_name, "label_closest_voxel.mrc")
+                input_map_path = os.path.join(base_path, "43_proteindataset",protein_name, f"{protein_name}_segment.mrc")
+                final_pdb_output = os.path.join(base_path,"43native protein" ,"pdb.ent", f"{protein_name}.pdb")
+                atom_label_path = os.path.join(base_path,"43_proteindataset", protein_name, "label.mrc")
 
                 # 调用掩膜处理函数
                 mask_map_by_pdb_slow(input_map_path, atom_label_path, final_pdb_output, cutoff=2, keep_label=True)
