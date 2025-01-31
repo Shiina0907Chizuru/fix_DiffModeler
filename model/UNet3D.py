@@ -160,6 +160,237 @@ class ResnetBlocWithAttn(nn.Module):
         if(self.with_attn):
             x = self.attn(x)
         return x
+
+class TokKANLinear3D(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=3,
+        grid_size=5,
+        spline_order=3,
+        scale_noise=0.1,
+        scale_base=1.0,
+        scale_spline=1.0,
+        enable_standalone_scale_spline=True,
+        base_activation=nn.SiLU,
+        grid_eps=0.02,
+        grid_range=[-1, 1],
+    ):
+        super(TokKANLinear3D, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.grid_size = grid_size
+        self.spline_order = spline_order
+        self.padding = kernel_size // 2
+
+        h = (grid_range[1] - grid_range[0]) / grid_size
+        grid = (
+            (
+                torch.arange(-spline_order, grid_size + spline_order + 1) * h
+                + grid_range[0]
+            )
+            .expand(in_channels, -1)
+            .contiguous()
+        )
+        self.register_buffer("grid", grid)
+
+        self.base_conv = nn.Conv3d(in_channels, out_channels, kernel_size, padding=self.padding)
+        self.spline_weight = nn.Parameter(
+            torch.Tensor(out_channels, in_channels, grid_size + spline_order)
+        )
+        if enable_standalone_scale_spline:
+            self.spline_scaler = nn.Parameter(
+                torch.Tensor(out_channels, in_channels)
+            )
+
+        self.scale_noise = scale_noise
+        self.scale_base = scale_base
+        self.scale_spline = scale_spline
+        self.enable_standalone_scale_spline = enable_standalone_scale_spline
+        self.base_activation = base_activation()
+        self.grid_eps = grid_eps
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.base_conv.weight, a=math.sqrt(5) * self.scale_base)
+        with torch.no_grad():
+            noise = (
+                (
+                    torch.rand(self.grid_size + 1, self.in_channels, self.out_channels)
+                    - 1 / 2
+                )
+                * self.scale_noise
+                / self.grid_size
+            )
+            self.spline_weight.data.copy_(
+                (self.scale_spline if not self.enable_standalone_scale_spline else 1.0)
+                * self.curve2coeff(
+                    self.grid.T[self.spline_order : -self.spline_order],
+                    noise,
+                )
+            )
+            if self.enable_standalone_scale_spline:
+                nn.init.kaiming_uniform_(self.spline_scaler, a=math.sqrt(5) * self.scale_spline)
+
+    def curve2coeff(self, x, y):
+        """Convert curve points to B-spline coefficients."""
+        n = x.size(0)
+        A = torch.zeros(n, n, device=x.device)
+        for i in range(n):
+            t = x[i]
+            bases = self.b_splines(t.expand(1, -1))
+            A[i] = bases[0, 0]
+        return torch.linalg.solve(A, y.permute(1, 2, 0)).permute(2, 0, 1)
+
+    def b_splines(self, x):
+        """Compute B-spline bases."""
+        grid = self.grid
+        x = x.unsqueeze(-1)
+        bases = ((x >= grid[:, :-1]) & (x < grid[:, 1:])).to(x.dtype)
+        for k in range(1, self.spline_order + 1):
+            bases = (
+                (x - grid[:, : -(k + 1)])
+                / (grid[:, k:-1] - grid[:, : -(k + 1)])
+                * bases[:, :, :-1]
+            ) + (
+                (grid[:, k + 1 :] - x)
+                / (grid[:, k + 1 :] - grid[:, 1 : -(k)])
+                * bases[:, :, 1:]
+            )
+        return bases
+
+    def forward(self, x):
+        # Base convolution path
+        base_out = self.base_conv(x)
+        base_out = self.base_activation(base_out)
+
+        # Spline path
+        B, C, D, H, W = x.shape
+        x_flat = x.view(B, C, -1).permute(0, 2, 1)  # [B, D*H*W, C]
+        
+        bases = self.b_splines(x_flat)  # [B, D*H*W, C, grid_size + spline_order]
+        
+        if self.enable_standalone_scale_spline:
+            spline_weight = self.spline_weight * self.spline_scaler.unsqueeze(-1)
+        else:
+            spline_weight = self.spline_weight
+            
+        spline_out = torch.einsum('bdhwc,cod->bdhwo', bases, spline_weight)
+        spline_out = spline_out.view(B, D, H, W, self.out_channels).permute(0, 4, 1, 2, 3)
+
+        return base_out + spline_out
+
+
+class TokKAN3D(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=3,
+        grid_size=5,
+        spline_order=3,
+        scale_noise=0.1,
+        scale_base=1.0,
+        scale_spline=1.0,
+        base_activation=nn.SiLU,
+        grid_eps=0.02,
+        grid_range=[-1, 1],
+        norm_groups=32,
+    ):
+        super(TokKAN3D, self).__init__()
+        self.norm = nn.GroupNorm(norm_groups, in_channels)
+        self.kan = TokKANLinear3D(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            grid_size=grid_size,
+            spline_order=spline_order,
+            scale_noise=scale_noise,
+            scale_base=scale_base,
+            scale_spline=scale_spline,
+            base_activation=base_activation,
+            grid_eps=grid_eps,
+            grid_range=grid_range,
+        )
+
+    def forward(self, x):
+        x = self.norm(x)
+        return self.kan(x)
+
+
+class DWConv3D(nn.Module):
+    def __init__(self, dim):
+        super(DWConv3D, self).__init__()
+        self.dwconv = nn.Conv3d(dim, dim, 3, 1, 1, bias=True, groups=dim)
+        self.norm = nn.GroupNorm(32, dim)
+        self.act = Swish()
+
+    def forward(self, x):
+        return self.act(self.norm(self.dwconv(x)))
+
+class KANLayer3D(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, dropout=0):
+        super().__init__()
+        self.hidden_features = hidden_features or in_features
+        self.out_features = out_features or in_features
+        
+        # First KAN path
+        self.kan1 = TokKANLinear3D(in_features, self.hidden_features)
+        self.dwconv1 = DWConv3D(self.hidden_features)
+        
+        # Second KAN path
+        self.kan2 = TokKANLinear3D(self.hidden_features, self.out_features)
+        self.dwconv2 = DWConv3D(self.hidden_features)
+        
+        # Third KAN path
+        self.kan3 = TokKANLinear3D(self.hidden_features, self.out_features)
+        self.dwconv3 = DWConv3D(self.hidden_features)
+        
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # First KAN block
+        x = self.kan1(x)
+        x = self.dwconv1(x)
+        x = self.drop(x)
+        
+        # Second KAN block
+        x = self.kan2(x)
+        x = self.dwconv2(x)
+        x = self.drop(x)
+        
+        # Third KAN block
+        x = self.kan3(x)
+        x = self.dwconv3(x)
+        x = self.drop(x)
+        
+        return x
+
+class KANBlock3D(nn.Module):
+    def __init__(self, dim, dim_out, *, noise_level_emb_dim=None, dropout=0, norm_groups=32):
+        super().__init__()
+        self.noise_func = None
+        if exists(noise_level_emb_dim):
+            self.noise_func = FeatureWiseAffine(noise_level_emb_dim, dim_out)
+
+        self.norm1 = nn.GroupNorm(norm_groups, dim)
+        self.kan = KANLayer3D(dim, dim_out, dim_out, dropout=dropout)
+        self.norm2 = nn.GroupNorm(norm_groups, dim_out)
+        self.shortcut = nn.Conv3d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+
+    def forward(self, x, time_emb=None):
+        h = self.norm1(x)
+        h = self.kan(h)
+        h = self.norm2(h)
+
+        if exists(self.noise_func):
+            h = self.noise_func(h, time_emb)
+
+        return h + self.shortcut(x)
+
 class UNet3D(nn.Module):
     def __init__(
         self,
@@ -264,3 +495,149 @@ class UNet3D(nn.Module):
 
         return self.final_conv(x)
 
+class UKAN3D(nn.Module):
+    def __init__(
+        self,
+        in_channel=2,
+        out_channel=1,
+        inner_channel=32,
+        norm_groups=32,
+        channel_mults=(1, 2, 4, 8, 8),
+        attn_res=(8),
+        res_blocks=3,
+        dropout=0,
+        with_noise_level_emb=True,
+        box_size=64,
+    ):
+        super().__init__()
+        if with_noise_level_emb:
+            noise_level_channel = inner_channel
+            self.noise_level_mlp = nn.Sequential(
+                PositionalEncoding(inner_channel),
+                nn.Linear(inner_channel, inner_channel * 4),
+                Swish(),
+                nn.Linear(inner_channel * 4, inner_channel)
+            )
+        else:
+            noise_level_channel = None
+            self.noise_level_mlp = None
+            
+        num_mults = len(channel_mults)
+        pre_channel = inner_channel
+        feat_channels = [pre_channel]
+        now_res = box_size
+        
+        # Initial conv
+        downs = [nn.Conv3d(in_channel, inner_channel, kernel_size=3, padding=1)]
+        
+        # Configure downsampling layers
+        for ind in range(num_mults):
+            is_last = (ind == num_mults - 1)
+            use_attn = (now_res in attn_res)
+            channel_mult = inner_channel * channel_mults[ind]
+            
+            # For the last two scales, use KANBlock3D
+            if ind >= num_mults - 2:  # 最后两个尺度使用KANBlock3D
+                for _ in range(0, res_blocks):
+                    downs.append(KANBlock3D(
+                        pre_channel, channel_mult,
+                        noise_level_emb_dim=noise_level_channel,
+                        norm_groups=norm_groups,
+                        dropout=dropout
+                    ))
+                    feat_channels.append(channel_mult)
+                    pre_channel = channel_mult
+            else:  # 其他尺度使用原来的ResnetBlocWithAttn
+                for _ in range(0, res_blocks):
+                    downs.append(ResnetBlocWithAttn(
+                        pre_channel, channel_mult,
+                        noise_level_emb_dim=noise_level_channel,
+                        norm_groups=norm_groups,
+                        dropout=dropout,
+                        with_attn=use_attn
+                    ))
+                    feat_channels.append(channel_mult)
+                    pre_channel = channel_mult
+                    
+            if not is_last:
+                downs.append(Downsample(pre_channel))
+                feat_channels.append(pre_channel)
+                now_res = now_res//2
+        
+        self.downs = nn.ModuleList(downs)
+        
+        # Middle blocks with KANBlock3D
+        self.mid = nn.ModuleList([
+            KANBlock3D(pre_channel, pre_channel,
+                      noise_level_emb_dim=noise_level_channel,
+                      norm_groups=norm_groups,
+                      dropout=dropout),
+            KANBlock3D(pre_channel, pre_channel,
+                      noise_level_emb_dim=noise_level_channel,
+                      norm_groups=norm_groups,
+                      dropout=dropout)
+        ])
+        
+        # Upsampling path
+        ups = []
+        for ind in reversed(range(num_mults)):
+            is_last = (ind < 1)
+            use_attn = (now_res in attn_res)
+            channel_mult = inner_channel * channel_mults[ind]
+            
+            # For the first two scales (corresponding to the last two in downsampling), use KANBlock3D
+            if ind >= num_mults - 2:
+                for _ in range(0, res_blocks+1):
+                    ups.append(KANBlock3D(
+                        pre_channel+feat_channels.pop(),
+                        channel_mult,
+                        noise_level_emb_dim=noise_level_channel,
+                        norm_groups=norm_groups,
+                        dropout=dropout
+                    ))
+                    pre_channel = channel_mult
+            else:
+                for _ in range(0, res_blocks+1):
+                    ups.append(ResnetBlocWithAttn(
+                        pre_channel+feat_channels.pop(),
+                        channel_mult,
+                        noise_level_emb_dim=noise_level_channel,
+                        norm_groups=norm_groups,
+                        dropout=dropout,
+                        with_attn=use_attn
+                    ))
+                    pre_channel = channel_mult
+                    
+            if not is_last:
+                ups.append(Upsample(pre_channel))
+                now_res = now_res*2
+        
+        self.ups = nn.ModuleList(ups)
+        
+        self.final_conv = Block(pre_channel, default(out_channel, in_channel), groups=norm_groups)
+
+    def forward(self, x, time=None):
+        """
+        x: (B, C, D, H, W)
+        time: (B, 1)
+        """
+        t = self.noise_level_mlp(time) if exists(time) else None
+
+        feats = []
+        for layer in self.downs:
+            if isinstance(layer, (ResnetBlocWithAttn, KANBlock3D)):
+                x = layer(x, t)
+            else:
+                x = layer(x)
+            feats.append(x)
+
+        for layer in self.mid:
+            x = layer(x, t)
+
+        for layer in self.ups:
+            if isinstance(layer, Upsample):
+                x = layer(x)
+            else:
+                x = layer(torch.cat((x, feats.pop()), dim=1), t)
+
+        return self.final_conv(x)
