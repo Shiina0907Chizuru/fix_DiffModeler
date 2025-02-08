@@ -1,8 +1,17 @@
 import functools
 import logging
-from model.UNet3D import UNet3D
+from model.UNet3D import UNet3D, UKAN3D
 from model.GeneralDiffusion import GeneralDiffusion
 from model.model_utils import init_weights
+
+def get_network_class(network_type):
+    if network_type.lower() == 'unet3d':
+        return UNet3D
+    elif network_type.lower() == 'ukan3d':
+        return UKAN3D
+    else:
+        raise ValueError(f"Unknown network type: {network_type}")
+
 def define_G(opt):
     model_opt = opt['model']
     if ('norm_groups' not in model_opt['unet']) or model_opt['unet']['norm_groups'] is None:
@@ -11,8 +20,13 @@ def define_G(opt):
         schedule_opt=model_opt['beta_schedule']['train']
     else:
         schedule_opt = model_opt['beta_schedule']['val']
+
+    # Get network class based on configuration
+    network_type = model_opt['unet'].get('network_type', 'unet3d')  # 默认使用UNet3D
+    NetworkClass = get_network_class(network_type)
+    
     #use general framework for diffusion
-    encode_model = UNet3D(
+    encode_model = NetworkClass(
         in_channel=1,
         out_channel=1,
         norm_groups=model_opt['unet']['norm_groups'],
@@ -25,7 +39,7 @@ def define_G(opt):
         with_noise_level_emb=False
         )
 
-    diff_model = UNet3D(
+    diff_model = NetworkClass(
         in_channel=model_opt['unet']['in_channel'],
         out_channel=model_opt['unet']['out_channel'],
         norm_groups=model_opt['unet']['norm_groups'],

@@ -1,5 +1,3 @@
-
-
 {
     "phase": "infer",
     "fasta_thread": 4,
@@ -11,6 +9,7 @@
     "model": {
       "path": "best_model/diffusion_best.pth.tar",
       "unet": {
+            "network_type": "unet3d", 
             "in_channel": 3,
             "out_channel": 1,
             "inner_channel": 32,

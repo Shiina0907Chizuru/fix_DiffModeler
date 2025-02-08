@@ -138,15 +138,14 @@ def process_protein(protein_name, contour_level):
     - None
     """
     # 根据蛋白质名称自动设置路径
-    base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data"
-    # base_path = "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data"
+    # base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data"
+    base_path = "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data"
     input_map_path = os.path.join(base_path,"mrc",f"{protein_name}_map.mrc")
     save_path = os.path.join(base_path,"43_proteindataset" , protein_name)
     map_name = protein_name
 
     # 调用预处理函数
-    processed_save_path, processed_map_path = preprocess_map(input_map_path, save_path, map_name, contour_level)
-
+    processed_save_path, processed_map_path = preprocess_map(input_map_path, save_path, protein_name, contour_level)
     print(f"Processed files are saved at: {processed_save_path}")
     print(f"New processed map path: {processed_map_path}")
 
@@ -198,4 +197,3 @@ if __name__ == "__main__":
 
     # 从文件中读取并处理
     process_from_file(args.info_txt)
-
