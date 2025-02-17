@@ -11,3 +11,4 @@ if __name__ == "__main__":
     from training.main_worker import main_worker
     main_worker(params)
 # command: python train.py -F "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\mydataset" --info_txt "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler\info_data.txt" --config config/diffmodeler_train.json --gpu 0 --output "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\train_result"
+# commang:python train.py -F "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\dataset" --info_txt "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\pdb_ids.txt" --config config/diffmodeler_train.json --gpu 0 --output "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\train_result"
