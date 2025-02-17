@@ -305,10 +305,12 @@ def format_map(input_map,output_map):
 # save_label_map(input_map_path,atom_label_path,output_atom_label)
 
 # 集群版本
+# 原始版本的函数（已注释）
+"""
 def process_from_file(input_file):
-    """
+    '''
     从文本文件中读取蛋白质信息并进行掩膜处理。
-    """
+    '''
     base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data"
 
     with open(input_file, 'r') as file:
@@ -329,6 +331,55 @@ def process_from_file(input_file):
                 mask_map_by_pdb_slow(input_map_path, atom_label_path, final_pdb_output, cutoff=2, keep_label=True)
             except ValueError:
                 print(f"Invalid line format: {line}")
+                continue
+"""
+
+# 新版本的函数
+def process_from_file(input_file):
+    """
+    从文本文件中读取蛋白质信息并进行掩膜处理。
+    适配新的目录结构版本。
+    """
+    base_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\trainpdb_emdb_data"
+
+    with open(input_file, 'r') as file:
+        for line in file:
+            line = line.strip()
+            if not line or ':' not in line:
+                continue
+
+            try:
+                protein_name, _ = line.split(':')  # 只需要蛋白质名称
+                protein_folder = f"PDB-{protein_name.upper()}-EMD-*"  # 使用通配符匹配EMD编号
+                
+                # 使用glob找到匹配的文件夹
+                import glob
+                matching_folders = glob.glob(os.path.join(base_path, protein_folder))
+                if not matching_folders:
+                    print(f"No matching folder found for protein: {protein_name}")
+                    continue
+                    
+                protein_dir = matching_folders[0]  # 使用第一个匹配的文件夹
+                
+                # 设置输入和输出路径
+                input_map_path = os.path.join(protein_dir, "processed", f"{protein_name}_segment.mrc")
+                final_pdb_output = os.path.join(protein_dir, f"PDB-{protein_name.upper()}.pdb")
+                atom_label_path = os.path.join(protein_dir, "processed", f"{protein_name}_label.mrc")
+
+                # 确保输出目录存在
+                os.makedirs(os.path.dirname(atom_label_path), exist_ok=True)
+
+                # 调用掩膜处理函数
+                print(f"Processing {protein_name}...")
+                print(f"Input map: {input_map_path}")
+                print(f"PDB file: {final_pdb_output}")
+                print(f"Output label: {atom_label_path}")
+                
+                mask_map_by_pdb_slow(input_map_path, atom_label_path, final_pdb_output, cutoff=2, keep_label=True)
+                print(f"Finished processing {protein_name}")
+                
+            except Exception as e:
+                print(f"Error processing {protein_name}: {str(e)}")
                 continue
 
 if __name__ == "__main__":

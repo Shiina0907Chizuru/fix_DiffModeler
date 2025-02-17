@@ -1,7 +1,6 @@
-from pathlib import Path
-
 import mrcfile
 import numpy as np
+from pathlib import Path
 
 
 def Unify_Map(input_map_path, new_map_path):
@@ -14,8 +13,6 @@ def Unify_Map(input_map_path, new_map_path):
     cella = np.array(mrc.header.cella.tolist(), dtype=np.float32)
     mapcrs = np.asarray([mrc.header.mapc, mrc.header.mapr, mrc.header.maps], dtype=int)
     msample = np.asarray([mrc.header.mx, mrc.header.my, mrc.header.mz], dtype=int)
-    # if np.sum(nstart) == 0:
-    #     return input_map_path
     mrc.print_header()
     mrc.close()
 

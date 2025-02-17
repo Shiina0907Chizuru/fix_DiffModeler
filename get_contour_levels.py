@@ -19,7 +19,7 @@ driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), opti
 print("WebDriver initialized.")
 
 # txt 文件路径
-pdb_list_file = "D:/桌面/test/pdb.txt"
+pdb_list_file = "E:/ZJUT/Research/MrZhouDeepLearning/DiffReaserch/DiffModeler_data/newdateset/pdb_ids.txt"
 
 # 保存 contour level 值的 txt 文件路径
 output_file_path = "contour_levels1.txt"

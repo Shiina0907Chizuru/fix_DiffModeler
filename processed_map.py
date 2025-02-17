@@ -138,10 +138,32 @@ def process_protein(protein_name, contour_level):
     - None
     """
     # 根据蛋白质名称自动设置路径
+    # 旧代码注释掉
     # base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data"
-    base_path = "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data"
-    input_map_path = os.path.join(base_path,"mrc",f"{protein_name}_map.mrc")
-    save_path = os.path.join(base_path,"43_proteindataset" , protein_name)
+    # input_map_path = os.path.join(base_path,"mrc",f"{protein_name}_map.mrc")
+    # save_path = os.path.join(base_path,"43_proteindataset" , protein_name)
+    
+    # 新的路径设置
+    base_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset"
+    input_folder = os.path.join(base_path, "trainpdb_emdb_data", f"PDB-{protein_name.upper()}-EMD-*")
+    
+    # 使用glob查找匹配的文件夹
+    import glob
+    matching_folders = glob.glob(input_folder)
+    if not matching_folders:
+        print(f"No matching folder found for protein: {protein_name}")
+        return
+        
+    input_folder = matching_folders[0]  # 使用第一个匹配的文件夹
+    
+    # 在文件夹中查找.map文件
+    map_files = glob.glob(os.path.join(input_folder, "*.map"))
+    if not map_files:
+        print(f"No .map file found in folder: {input_folder}")
+        return
+        
+    input_map_path = map_files[0]  # 使用第一个找到的.map文件
+    save_path = os.path.join(input_folder, "processed")
     map_name = protein_name
 
     # 调用预处理函数
@@ -155,9 +177,7 @@ def process_from_file(input_file):
     从文本文件中读取蛋白质名称和轮廓阈值，逐行处理。
 
     文本文件格式：
-    3j9p:8.0
-    3j22:1.0
-    8h3r:0.001
+    protein_id: contour_level值
 
     参数:
     - input_file (str): 文本文件的路径。
@@ -170,27 +190,53 @@ def process_from_file(input_file):
         return
 
     with open(input_file, 'r') as file:
+        # 旧代码注释掉
+        # for line in file:
+        #     line = line.strip()
+        #     if not line or ':' not in line:
+        #         continue  # 跳过空行或无效行
+        #     try:
+        #         protein_name, contour_level = line.split(':')
+        
+        # 新的解析逻辑
         for line in file:
             line = line.strip()
-            if not line or ':' not in line:
-                continue  # 跳过空行或无效行
+            if not line:
+                continue  # 跳过空行
 
-            # 提取蛋白质名称和轮廓阈值
             try:
-                protein_name, contour_level = line.split(':')
-                contour_level = float(contour_level)
+                # 新格式: "protein_id: contour_level值"
+                parts = line.split(':')
+                if len(parts) != 2:
+                    print(f"Invalid line format: {line}")
+                    continue
+                    
+                protein_name = parts[0].strip()
+                contour_level = float(parts[1].strip().split()[0])  # 取第一个数值
+                
+                # 如果protein_name中包含PDB-前缀，去掉它
+                if protein_name.startswith('PDB-'):
+                    protein_name = protein_name[4:]
+                    
                 print(f"Processing protein: {protein_name}, Contour level: {contour_level}")
                 process_protein(protein_name, contour_level)
-            except ValueError:
-                print(f"Invalid line format: {line}")
+            except (ValueError, IndexError) as e:
+                print(f"Error processing line: {line}")
+                print(f"Error details: {str(e)}")
                 continue
 
 
 if __name__ == "__main__":
     # 设置命令行参数解析
     parser = argparse.ArgumentParser(description="Preprocess .map files for protein structures.")
-    parser.add_argument("--info_txt", type=str, required=True,
-                        help="Path to the input .txt file containing protein names and contour levels.")
+    # 旧代码注释掉
+    # parser.add_argument("--info_txt", type=str, required=True,
+    #                     help="Path to the input .txt file containing protein names and contour levels.")
+    
+    # 新的参数设置
+    parser.add_argument("--info_txt", type=str, 
+                      default=r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\contour_levels1.txt",
+                      help="Path to the input .txt file containing protein names and contour levels.")
 
     # 解析参数
     args = parser.parse_args()
