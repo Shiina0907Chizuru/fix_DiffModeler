@@ -2,8 +2,9 @@
 
 import math
 import torch
-from torch import nn
+import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange, repeat
 from inspect import isfunction
 import torch.nn.functional as F
 
@@ -162,107 +163,99 @@ class ResnetBlocWithAttn(nn.Module):
         return x
 
 class TokKANLinear3D(nn.Module):
-    def __init__(
-        self,
-        in_channels,
-        out_channels,
-        kernel_size=3,
-        grid_size=5,
-        spline_order=3,
-        scale_noise=0.1,
-        scale_base=1.0,
-        scale_spline=1.0,
-        enable_standalone_scale_spline=True,
-        base_activation=nn.SiLU,
-        grid_eps=0.02,
-        grid_range=[-1, 1],
-        norm_groups=32,
-        bias=True
-    ):
-        super(TokKANLinear3D, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.grid_size = grid_size
-        self.spline_order = spline_order
-        self.padding = kernel_size // 2
+    """
+    TokKANLinear3D: 3D version of KANLinear
+    Implements the base transformation with non-linear activation
+    """
+    def __init__(self, in_channel, out_channel, norm_groups=32):
+        super().__init__()
+        self.in_channel = in_channel
+        self.out_channel = out_channel
         
-        # Group Normalization
-        self.norm = nn.GroupNorm(norm_groups, in_channels)
+        # Main transformation
+        self.norm = nn.GroupNorm(norm_groups, in_channel)
+        self.weight = nn.Parameter(torch.randn(out_channel, in_channel, 1, 1, 1))
+        self.bias = nn.Parameter(torch.zeros(out_channel))
+        self.act = nn.SiLU()
         
-        # Base convolution path
-        self.weight = nn.Parameter(torch.Tensor(out_channels, in_channels, kernel_size, kernel_size, kernel_size))
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(out_channels))
-        else:
-            self.register_parameter('bias', None)
-        self.base_activation = base_activation()
+        # Scale factor
+        self.scale = 1.0
         
-        # Spline path
-        h = (grid_range[1] - grid_range[0]) / grid_size
-        grid = (
-            (torch.arange(-spline_order, grid_size + spline_order + 1) * h + grid_range[0])
-            .expand(in_channels, -1)
-            .contiguous()
-        )
-        self.register_buffer("grid", grid)
-        
-        # Simplified spline path
-        self.spline_weight = nn.Parameter(
-            torch.Tensor(out_channels, in_channels, 1, 1, 1)
-        )
-        
-        self.scale_base = scale_base
+        # Initialize weights
         self.reset_parameters()
 
     def reset_parameters(self):
-        # Initialize base weights
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5) * self.scale_base)
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias, -bound, bound)
-        
-        # Initialize spline weights
-        nn.init.kaiming_uniform_(self.spline_weight, a=math.sqrt(5))
 
     def forward(self, x):
-        # Apply normalization
         x = self.norm(x)
-        
-        # Base convolution path
-        x_base = self.base_activation(x)
-        base_output = F.conv3d(x_base, self.weight, self.bias, padding=self.padding)
-        
-        # Simplified spline path
-        spline_output = F.conv3d(x, self.spline_weight, None, padding=0)
-        
-        return base_output + spline_output
+        x = F.conv3d(x, self.scale * self.weight, self.bias)
+        x = self.act(x)
+        return x
 
-class TokKANBlock3D(nn.Module):
-    def __init__(self, dim, dim_out, *, noise_level_emb_dim=None, norm_groups=32, dropout=0):
+class KANLayer3D(nn.Module):
+    """
+    KANLayer3D: Implements the complete KAN layer with multiple transformations
+    """
+    def __init__(self, in_channel, out_channel, *, noise_level_emb_dim=None, norm_groups=32):
         super().__init__()
+        
+        # Noise level embedding
         self.noise_func = None
         if exists(noise_level_emb_dim):
-            self.noise_func = FeatureWiseAffine(noise_level_emb_dim, dim_out)
-
-        # TokKAN path
-        self.norm1 = nn.GroupNorm(norm_groups, dim)
-        self.tokkan = TokKANLinear3D(dim, dim_out, norm_groups=norm_groups)
-        self.norm2 = nn.GroupNorm(norm_groups, dim_out)
-        self.dropout = nn.Dropout(dropout)
-        self.shortcut = nn.Conv3d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+            self.noise_func = nn.Sequential(
+                nn.SiLU(),
+                nn.Linear(noise_level_emb_dim, out_channel)
+            )
+        
+        # First KAN block
+        self.kan1 = TokKANLinear3D(in_channel, out_channel, norm_groups=norm_groups)
+        
+        # Second KAN block
+        self.kan2 = TokKANLinear3D(out_channel, out_channel, norm_groups=norm_groups)
+        
+        # Third KAN block
+        self.kan3 = TokKANLinear3D(out_channel, out_channel, norm_groups=norm_groups)
+        
+        # Residual connection
+        self.res_conv = nn.Conv3d(in_channel, out_channel, 1) if in_channel != out_channel else nn.Identity()
 
     def forward(self, x, time_emb=None):
-        h = self.norm1(x)
-        h = self.tokkan(h)
-        h = self.norm2(h)
-        h = self.dropout(h)
-
+        identity = self.res_conv(x)
+        
+        # First transformation
+        h = self.kan1(x)
+        
+        # Add noise level embedding if available
         if exists(self.noise_func) and exists(time_emb):
-            h = self.noise_func(h, time_emb)
+            # time_emb shape: [B, 1, C] -> [B, C]
+            time_emb = time_emb.squeeze(1)
+            time_emb = self.noise_func(time_emb)
+            h = h + time_emb.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        
+        # Second and third transformations
+        h = self.kan2(h)
+        h = self.kan3(h)
+        
+        # Residual connection
+        return h + identity
 
-        return h + self.shortcut(x)
+class TokKANBlock3D(nn.Module):
+    """
+    TokKANBlock3D: Top level module that uses KANLayer3D
+    """
+    def __init__(self, in_channel, out_channel, *, noise_level_emb_dim=None, norm_groups=32, dropout=0.):
+        super().__init__()
+        self.kan = KANLayer3D(in_channel, out_channel, noise_level_emb_dim=noise_level_emb_dim, norm_groups=norm_groups)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, time_emb=None):
+        x = self.kan(x, time_emb)
+        return self.dropout(x)
 
 class UKAN3D(nn.Module):
     def __init__(
@@ -681,7 +674,6 @@ class UNet3D(nn.Module):
 #         scale_noise=0.1,
 #         scale_base=1.0,
 #         scale_spline=1.0,
-#         enable_standalone_scale_spline=True,
 #         base_activation=nn.SiLU,
 #         grid_eps=0.02,
 #         grid_range=[-1, 1],
@@ -693,105 +685,62 @@ class UNet3D(nn.Module):
 #         self.grid_size = grid_size
 #         self.spline_order = spline_order
 #         self.padding = kernel_size // 2
-
+        
+#         # Group Normalization
+#         self.norm = nn.GroupNorm(32, in_channels)
+        
+#         # Base convolution path
+#         self.weight = nn.Parameter(torch.Tensor(out_channels, in_channels, kernel_size, kernel_size, kernel_size))
+#         if bias:
+#             self.bias = nn.Parameter(torch.Tensor(out_channels))
+#         else:
+#             self.register_parameter('bias', None)
+#         self.base_activation = base_activation()
+        
+#         # Spline path
 #         h = (grid_range[1] - grid_range[0]) / grid_size
 #         grid = (
-#             (
-#                 torch.arange(-spline_order, grid_size + spline_order + 1) * h
-#                 + grid_range[0]
-#             )
+#             (torch.arange(-spline_order, grid_size + spline_order + 1) * h + grid_range[0])
 #             .expand(in_channels, -1)
 #             .contiguous()
 #         )
 #         self.register_buffer("grid", grid)
-
-#         self.base_conv = nn.Conv3d(in_channels, out_channels, kernel_size, padding=self.padding)
+        
+#         # Simplified spline path
 #         self.spline_weight = nn.Parameter(
-#             torch.Tensor(out_channels, in_channels, grid_size + spline_order)
+#             torch.Tensor(out_channels, in_channels, 1, 1, 1)
 #         )
-#         if enable_standalone_scale_spline:
-#             self.spline_scaler = nn.Parameter(
-#                 torch.Tensor(out_channels, in_channels)
-#             )
-
-#         self.scale_noise = scale_noise
+        
 #         self.scale_base = scale_base
-#         self.scale_spline = scale_spline
-#         self.enable_standalone_scale_spline = enable_standalone_scale_spline
-#         self.base_activation = base_activation()
-#         self.grid_eps = grid_eps
-
+        
 #         self.reset_parameters()
 
 #     def reset_parameters(self):
-#         nn.init.kaiming_uniform_(self.base_conv.weight, a=math.sqrt(5) * self.scale_base)
-#         with torch.no_grad():
-#             noise = (
-#                 (
-#                     torch.rand(self.grid_size + 1, self.in_channels, self.out_channels)
-#                     - 1 / 2
-#                 )
-#                 * self.scale_noise
-#                 / self.grid_size
-#             )
-#             self.spline_weight.data.copy_(
-#                 (self.scale_spline if not self.enable_standalone_scale_spline else 1.0)
-#                 * self.curve2coeff(
-#                     self.grid.T[self.spline_order : -self.spline_order],
-#                     noise,
-#                 )
-#             )
-#             if self.enable_standalone_scale_spline:
-#                 nn.init.kaiming_uniform_(self.spline_scaler, a=math.sqrt(5) * self.scale_spline)
-
-#     def curve2coeff(self, x, y):
-#         """Convert curve points to B-spline coefficients."""
-#         n = x.size(0)
-#         A = torch.zeros(n, n, device=x.device)
-#         for i in range(n):
-#             t = x[i]
-#             bases = self.b_splines(t.expand(1, -1))
-#             A[i] = bases[0, 0]
-#         return torch.linalg.solve(A, y.permute(1, 2, 0)).permute(2, 0, 1)
-
-#     def b_splines(self, x):
-#         """Compute B-spline bases."""
-#         grid = self.grid
-#         x = x.unsqueeze(-1)
-#         bases = ((x >= grid[:, :-1]) & (x < grid[:, 1:])).to(x.dtype)
-#         for k in range(1, self.spline_order + 1):
-#             bases = (
-#                 (x - grid[:, : -(k + 1)])
-#                 / (grid[:, k:-1] - grid[:, : -(k + 1)])
-#                 * bases[:, :, :-1]
-#             ) + (
-#                 (grid[:, k + 1 :] - x)
-#                 / (grid[:, k + 1 :] - grid[:, 1 : -(k)])
-#                 * bases[:, :, 1:]
-#             )
-#         return bases
+#         # Initialize base weights
+#         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5) * self.scale_base)
+#         if self.bias is not None:
+#             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+#             bound = 1 / math.sqrt(fan_in)
+#             nn.init.uniform_(self.bias, -bound, bound)
+        
+#         # Initialize spline weights
+#         nn.init.kaiming_uniform_(self.spline_weight, a=math.sqrt(5))
 
 #     def forward(self, x):
+#         # Apply normalization
+#         x = self.norm(x)
+        
 #         # Base convolution path
-#         base_out = self.base_conv(x)
-#         base_out = self.base_activation(base_out)
-
-#         # Spline path
-#         B, C, D, H, W = x.shape
-#         x_flat = x.view(B, C, -1).permute(0, 2, 1)  # [B, D*H*W, C]
+#         x_base = self.base_activation(x)
+#         base_output = F.conv3d(x_base, 
+#                     self.scale_base * self.weight, 
+#                     self.bias,
+#                     padding=self.padding)  # padding=1 to maintain spatial dimensions
         
-#         bases = self.b_splines(x_flat)  # [B, D*H*W, C, grid_size + spline_order]
+#         # Simplified spline path
+#         spline_output = F.conv3d(x, self.spline_weight, None, padding=0)
         
-#         if self.enable_standalone_scale_spline:
-#             spline_weight = self.spline_weight * self.spline_scaler.unsqueeze(-1)
-#         else:
-#             spline_weight = self.spline_weight
-            
-#         spline_out = torch.einsum('bdhwc,cod->bdhwo', bases, spline_weight)
-#         spline_out = spline_out.view(B, D, H, W, self.out_channels).permute(0, 4, 1, 2, 3)
-
-#         return base_out + spline_out
-
+#         return base_output + spline_output
 
 # class TokKAN3D(nn.Module):
 #     def __init__(

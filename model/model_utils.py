@@ -67,11 +67,13 @@ def weights_init_orthogonal(m):
         init.orthogonal_(m.weight.data, gain=1)
         if m.bias is not None:
             m.bias.data.zero_()
-    elif classname.find('BatchNorm') != -1:
+    elif classname.find('BatchNorm2d') != -1:
         init.constant_(m.weight.data, 1.0)
         init.constant_(m.bias.data, 0.0)
-
-
+    elif classname.find('NewModule') != -1:
+        init.constant_(m.weight.data, 0.0)
+        if m.bias is not None:
+            m.bias.data.zero_()
 
 
 def init_weights(net, init_type='kaiming', scale=1, std=0.02):
