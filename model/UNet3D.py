@@ -162,6 +162,111 @@ class ResnetBlocWithAttn(nn.Module):
             x = self.attn(x)
         return x
 
+class KANActivation3D(nn.Module):
+    """B样条基激活函数"""
+    def __init__(self, grid_size=5, order=3, init_scale=1.0):
+        super().__init__()
+        self.grid_size = grid_size
+        self.order = order
+        self.symbolic_mode = False
+        
+        # 初始化控制点，使用float32
+        self.coefficients = nn.Parameter(torch.randn(grid_size + order, dtype=torch.float32) * init_scale)
+        
+        # 初始化节点向量，使用float32
+        knots = torch.linspace(-2, 2, grid_size + 2 * order, dtype=torch.float32)
+        self.register_buffer('knots', knots)
+        
+        # 用于符号化的表达式
+        self.symbolic_expr = None
+        
+        # 预计算基函数的缓存
+        self.basis_cache = {}
+        
+    def forward(self, x):
+        if self.symbolic_mode and self.symbolic_expr is not None:
+            return self.symbolic_expr(x)
+        
+        # 确保输入是float32
+        x = x.float()
+        result = torch.zeros_like(x, dtype=torch.float32)
+        
+        # 计算所有基函数
+        basis_functions = self.compute_basis_functions(x)
+        
+        # 线性组合
+        for i in range(len(self.coefficients)):
+            result += self.coefficients[i] * basis_functions[i]
+            
+        return result
+    
+    def compute_basis_functions(self, x):
+        """计算所有基函数"""
+        n = len(self.coefficients)
+        basis_functions = []
+        
+        # 计算0阶基函数
+        N = [[torch.zeros_like(x, dtype=torch.float32) for _ in range(n + self.order)] 
+             for _ in range(self.order + 1)]
+        
+        # 初始化0阶基函数
+        for i in range(n + self.order - 1):
+            N[0][i] = torch.where(
+                (self.knots[i] <= x) & (x < self.knots[i + 1]),
+                torch.ones_like(x, dtype=torch.float32),
+                torch.zeros_like(x, dtype=torch.float32)
+            )
+        
+        # 使用de Boor递推公式计算高阶基函数
+        for k in range(1, self.order + 1):
+            for i in range(n + self.order - k - 1):
+                N[k][i] = torch.zeros_like(x, dtype=torch.float32)
+                
+                # 第一项
+                if self.knots[i + k] != self.knots[i]:
+                    w1 = (x - self.knots[i]) / (self.knots[i + k] - self.knots[i])
+                    N[k][i] += w1 * N[k-1][i]
+                
+                # 第二项
+                if self.knots[i + k + 1] != self.knots[i + 1]:
+                    w2 = (self.knots[i + k + 1] - x) / (self.knots[i + k + 1] - self.knots[i + 1])
+                    N[k][i] += w2 * N[k-1][i + 1]
+        
+        # 返回最高阶基函数
+        return N[self.order][:n]
+    
+    def update_grid(self, x_samples):
+        """根据输入样本更新网格点"""
+        with torch.no_grad():
+            x_min, x_max = x_samples.min(), x_samples.max()
+            margin = (x_max - x_min) * 0.1
+            new_knots = torch.linspace(x_min - margin, x_max + margin, 
+                                     self.grid_size + 2 * self.order,
+                                     dtype=torch.float32)
+            self.knots.copy_(new_knots)
+            # 清除缓存
+            self.basis_cache.clear()
+    
+    def to_symbolic(self, sympy_x=None):
+        """转换为符号表达式"""
+        try:
+            import sympy as sp
+            if sympy_x is None:
+                sympy_x = sp.Symbol('x')
+            
+            expr = 0
+            for i in range(len(self.coefficients)):
+                coeff = float(self.coefficients[i].detach().cpu())
+                # 简化的符号表达式，使用多项式拟合
+                expr += coeff * (sympy_x ** i)
+            
+            self.symbolic_expr = sp.lambdify(sympy_x, expr, 'torch')
+            self.symbolic_mode = True
+            return expr
+        except ImportError:
+            print("Sympy not found. Symbolic conversion not available.")
+            return None
+
 class TokKANLinear3D(nn.Module):
     """
     TokKANLinear3D: 3D version of KANLinear
@@ -174,28 +279,85 @@ class TokKANLinear3D(nn.Module):
         
         # Main transformation
         self.norm = nn.GroupNorm(norm_groups, in_channel)
-        self.weight = nn.Parameter(torch.randn(out_channel, in_channel, 1, 1, 1))
-        self.bias = nn.Parameter(torch.zeros(out_channel))
-        self.act = nn.SiLU()
+        self.weight = nn.Parameter(torch.randn(out_channel, in_channel, 1, 1, 1, dtype=torch.float32))
+        self.bias = nn.Parameter(torch.zeros(out_channel, dtype=torch.float32))
+        
+        # 替换SiLU为KANActivation
+        self.act = KANActivation3D(grid_size=5, order=3)
         
         # Scale factor
         self.scale = 1.0
         
+        # 符号化模式标志
+        self.symbolic_mode = False
+        
+        # 参数共享组
+        self.param_group = None
+        
         # Initialize weights
         self.reset_parameters()
-
+    
     def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            nn.init.uniform_(self.bias, -bound, bound)
+        nn.init.kaiming_normal_(self.weight)
+        nn.init.zeros_(self.bias)
+    
+    def share_parameters(self, group):
+        """加入参数共享组"""
+        self.param_group = group
+        if hasattr(group, 'shared_weight'):
+            self.weight = group.shared_weight
+        if hasattr(group, 'shared_bias'):
+            self.bias = group.shared_bias
+    
+    def to_symbolic(self):
+        """转换为符号模式"""
+        self.symbolic_mode = True
+        self.act.to_symbolic()
+    
+    def update_grid(self, x_samples):
+        """更新激活函数的网格"""
+        self.act.update_grid(x_samples)
 
     def forward(self, x):
+        # 确保输入是float32
+        x = x.float()
+        
+        # 应用GroupNorm
         x = self.norm(x)
-        x = F.conv3d(x, self.scale * self.weight, self.bias)
+        
+        # 线性变换
+        x = F.conv3d(x, self.weight * self.scale, self.bias)
+        
+        # 如果在参数共享组中，使用共享参数
+        if self.param_group is not None:
+            if hasattr(self.param_group, 'scale'):
+                x = x * self.param_group.scale
+        
+        # 应用激活函数
         x = self.act(x)
+        
         return x
+
+class KANParameterGroup:
+    """KAN参数共享组，用于在多个KAN层之间共享参数"""
+    def __init__(self, channels, init_scale=1.0):
+        self.shared_scale = nn.Parameter(torch.ones(1) * init_scale)
+        self.members = []
+    
+    def add_member(self, layer):
+        """添加层到共享组"""
+        self.members.append(layer)
+        layer.share_parameters(self)
+    
+    def update_all_grids(self, x_samples):
+        """更新所有成员的网格"""
+        for member in self.members:
+            member.update_grid(x_samples)
+    
+    def to_symbolic_all(self):
+        """将所有成员转换为符号模式"""
+        for member in self.members:
+            member.to_symbolic()
 
 class KANLayer3D(nn.Module):
     """
@@ -223,6 +385,32 @@ class KANLayer3D(nn.Module):
         
         # Residual connection
         self.res_conv = nn.Conv3d(in_channel, out_channel, 1) if in_channel != out_channel else nn.Identity()
+        
+        # 参数共享组
+        self.param_group = None
+        
+        # 符号化模式标志
+        self.symbolic_mode = False
+    
+    def share_parameters(self, group):
+        """加入参数共享组"""
+        self.param_group = group
+        self.kan1.share_parameters(group)
+        self.kan2.share_parameters(group)
+        self.kan3.share_parameters(group)
+    
+    def to_symbolic(self):
+        """转换为符号模式"""
+        self.symbolic_mode = True
+        self.kan1.to_symbolic()
+        self.kan2.to_symbolic()
+        self.kan3.to_symbolic()
+    
+    def update_grid(self, x_samples):
+        """更新网格点"""
+        self.kan1.update_grid(x_samples)
+        self.kan2.update_grid(x_samples)
+        self.kan3.update_grid(x_samples)
 
     def forward(self, x, time_emb=None):
         identity = self.res_conv(x)
