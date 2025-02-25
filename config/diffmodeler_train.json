@@ -60,7 +60,7 @@
         }
     },
     "resume": {
-        "flag": false,
-        "path": "" //specify this path and change flag to true to resume training
+        "flag": true,
+        "path": "E:\\ZJUT\\Research\\MrZhouDeepLearning\\DiffReaserch\\DiffModeler_data\\newdateset\\train_result\\你的检查点文件夹\\model\\checkpoint.pth.tar"  
     }
 }
