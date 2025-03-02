@@ -329,7 +329,7 @@ def pdb2vol(
         input_pdb,
         resolution,
         output_mrc=None,
-        ref_map=False,
+        ref_map=None,
         sigma_coeff=0.356,
         real_space=False,
         normalize=True,
@@ -345,10 +345,14 @@ def pdb2vol(
         input_pdb (str): Path to the input PDB or CIF file.
         output_mrc (str): Path to save the output MRC file.
         resolution (float): Resolution of the output map.
-        ref_map (str, optional): Path to a reference map in MRC format. Defaults to False.
+        ref_map (str, optional): Path to a reference map in MRC format. Defaults to None.
         sigma_coeff (float, optional): Sigma coefficient for blurring. Defaults to 0.356.
         real_space (bool, optional): Whether to perform real-space blurring. Defaults to False.
         normalize (bool, optional): Whether to normalize the output map. Defaults to True.
+        backbone_only (bool, optional): Whether to use only backbone atoms. Defaults to False.
+        contour (float, optional): Contour level for thresholding. Defaults to False.
+        bin_mask (bool, optional): Whether to binarize the output map. Defaults to False.
+        return_data (bool, optional): Whether to return the map data. Defaults to False.
 
     Raises:
         ValueError: If the input file is not a PDB or CIF file.
@@ -356,7 +360,7 @@ def pdb2vol(
         ValueError: If the number of atoms and atom types do not match.
 
     Returns:
-        None
+        None or ndarray: Returns the map data if return_data is True, otherwise None.
     """
 
     # sigma_coeff = 1/(pi*sqrt(2*log(2)) = 0.187, makes the FT fall to half maximum at wavenumber 1/resolution
@@ -378,10 +382,21 @@ def pdb2vol(
         voxel_size = np.array([r, r, r])
         dims, origin = prot2map(atoms, types, voxel_size, resolution)
     else:
-        with mrcfile.open(ref_map, permissive=True) as mrc:
-            voxel_size = np.array([mrc.voxel_size.x, mrc.voxel_size.y, mrc.voxel_size.z])
-            dims = mrc.data.shape
-            origin = np.array([mrc.header.origin.x, mrc.header.origin.y, mrc.header.origin.z])
+        print(f"使用参考密度图: {ref_map}")
+        try:
+            with mrcfile.open(ref_map, permissive=True) as mrc:
+                voxel_size = np.array([mrc.voxel_size.x, mrc.voxel_size.y, mrc.voxel_size.z])
+                dims = mrc.data.shape
+                origin = np.array([mrc.header.origin.x, mrc.header.origin.y, mrc.header.origin.z])
+                print(f"参考密度图尺寸: {dims}")
+                print(f"参考密度图体素大小: {voxel_size}")
+                print(f"参考密度图原点: {origin}")
+        except Exception as e:
+            print(f"读取参考密度图失败: {e}")
+            print("将使用自动计算的尺寸和原点")
+            r = np.clip(resolution / 4.0, a_min=1.0, a_max=3.5)
+            voxel_size = np.array([r, r, r])
+            dims, origin = prot2map(atoms, types, voxel_size, resolution)
 
     x_s = int(dims[2] * voxel_size[2])
     y_s = int(dims[1] * voxel_size[1])

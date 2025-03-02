@@ -176,8 +176,8 @@ def process_from_file(input_file):
                 
                 # 设置输入和输出路径
                 input_map_path = os.path.join(protein_dir, "processed", f"{protein_name}_segment.mrc")
-                label_map_path = os.path.join(protein_dir, "processed", f"{protein_name}_label.mrc")
-                save_dir = os.path.join(protein_dir, "Dataset")
+                label_map_path = os.path.join(protein_dir, "processed", f"{protein_name}_backbone.mrc")
+                save_dir = os.path.join(protein_dir, "backbone_Dataset")
 
                 # 确保输出目录存在
                 os.makedirs(save_dir, exist_ok=True)

@@ -27,7 +27,7 @@ def process_dataset(source_root, target_root):
         print(f"Processing protein: {protein_id}")
         
         # 构建数据集路径
-        dataset_path = os.path.join(protein_path, 'Dataset')
+        dataset_path = os.path.join(protein_path, 'backbone_Dataset')
         if not os.path.exists(dataset_path):
             print(f"Dataset directory not found for {protein_id}")
             continue
