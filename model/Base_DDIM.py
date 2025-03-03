@@ -1,4 +1,3 @@
-
 import os
 import torch
 import torch.nn as nn
@@ -33,15 +32,45 @@ class Base_DDIM():
         s = str(network)
         n = sum(map(lambda x: x.numel(), network.parameters()))
         return s, n
+
     def set_device(self, x):
         if isinstance(x, dict):
             for key, item in x.items():
                 if item is not None:
-                    x[key] = item.to(self.device)
+                    # 处理字典值是列表的情况
+                    if isinstance(item, list):
+                        device_list = []
+                        for subitem in item:
+                            if subitem is not None:
+                                # 检查subitem是否有to方法(张量有，字符串等没有)
+                                if hasattr(subitem, 'to'):
+                                    device_list.append(subitem.to(self.device))
+                                else:
+                                    # 如果没有to方法，保持原样
+                                    device_list.append(subitem)
+                            else:
+                                device_list.append(None)
+                        x[key] = device_list
+                    else:
+                        # 检查item是否有to方法
+                        if hasattr(item, 'to'):
+                            x[key] = item.to(self.device)
         elif isinstance(x, list):
+            # 创建一个新的列表来保存移动到设备的元素
+            device_list = []
             for item in x:
                 if item is not None:
-                    item = item.to(self.device)
+                    # 检查item是否有to方法
+                    if hasattr(item, 'to'):
+                        device_list.append(item.to(self.device))
+                    else:
+                        # 如果没有to方法，保持原样
+                        device_list.append(item)
+                else:
+                    device_list.append(None)
+            x = device_list  # 将原列表替换为新列表
         else:
-            x = x.to(self.device)
+            # 检查x是否有to方法
+            if hasattr(x, 'to'):
+                x = x.to(self.device)
         return x

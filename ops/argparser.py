@@ -27,7 +27,7 @@ def argparser():
     opt_path = args.config
     params = vars(args)
     if opt_path is not None:
-        with open(opt_path, 'r') as f:
+        with open(opt_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.split('//')[0] + '\n'
                 json_str += line
@@ -45,13 +45,14 @@ def argparser_train():
     parser.add_argument("--config",type=str,default=None,help="specifying the config path")
     parser.add_argument("--gpu",type=str,default=None,help="specify the gpu we will use")
     parser.add_argument("--output",type=str,help="Output directory (including log/model)")
+    parser.add_argument("--trouble_log",action='store_true',help="Enable detailed logging of problematic batches")
     args = parser.parse_args()
     # remove comments starting with '//'
     json_str = ''
     opt_path = args.config
     params = vars(args)
     if opt_path is not None:
-        with open(opt_path, 'r') as f:
+        with open(opt_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.split('//')[0] + '\n'
                 json_str += line

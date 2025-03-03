@@ -246,15 +246,46 @@ def write_mrc_file(data, origin, voxel_size, mrc_file):
     Returns:
         None
     """
+    # 检查数据是否包含负值
+    has_negative = np.any(data < 0)
+    min_val = np.min(data)
+    
+    if has_negative:
+        print(f"数据包含负值，最小值: {min_val:.6f}，确保MRC文件使用mode 2（浮点模式）")
+    
+    # 1. 确保数据是浮点类型
+    float_data = data.astype(np.float32)
+    
+    # 2. 创建一个新的MRC文件，确保使用overwrite=True
     with mrcfile.new(mrc_file, overwrite=True) as mrc:
-        mrc.set_data(data.astype(np.float32))
-        mrc.update_header_from_data()
+        # 3. 设置数据 
+        mrc.set_data(float_data)
+        
+        # 4. 显式设置模式为2（32位浮点）
+        mrc.header.mode = 2
+        
+        # 5. 设置体素大小和原点
         mrc.voxel_size = tuple(voxel_size)
         mrc.header.origin.x = origin[0]
         mrc.header.origin.y = origin[1]
         mrc.header.origin.z = origin[2]
+        
+        # 6. 确保更新头部信息
         mrc.update_header_stats()
-        mrc.flush()
+    
+    # 验证文件是否正确保存
+    try:
+        with mrcfile.open(mrc_file) as mrc:
+            saved_min = np.min(mrc.data)
+            saved_max = np.max(mrc.data)
+            
+            if has_negative and saved_min >= 0:
+                print(f"警告: MRC文件可能未成功保存负值。文件中最小值为 {saved_min:.6f}，但原始数据最小值为 {min_val:.6f}")
+            else:
+                print(f"MRC文件已成功保存，数据范围: {saved_min:.6f} 到 {saved_max:.6f}")
+                print(f"MRC文件模式: {mrc.header.mode}")
+    except Exception as e:
+        print(f"验证MRC文件时出错: {e}")
 
 
 def blur_map(data, resolution, sigma_coeff):
@@ -301,9 +332,10 @@ def normalize_map(map_data):
     map_data (numpy.ndarray): The input map data.
 
     Returns:
-    numpy.ndarray: The normalized map data.
+    numpy.ndarray: The normalized map data, with mean=0 and standard deviation=1.
     """
     if map_data.std() != 0:
+        # 标准Z-score归一化：减去均值，除以标准差
         return (map_data - map_data.mean()) / map_data.std()
     else:
         return map_data
@@ -335,6 +367,7 @@ def pdb2vol(
         normalize=True,
         backbone_only=False,
         contour=False,
+        apply_contour=True,
         bin_mask=False,
         return_data=False,
 ):
@@ -351,6 +384,7 @@ def pdb2vol(
         normalize (bool, optional): Whether to normalize the output map. Defaults to True.
         backbone_only (bool, optional): Whether to use only backbone atoms. Defaults to False.
         contour (float, optional): Contour level for thresholding. Defaults to False.
+        apply_contour (bool, optional): Whether to apply contour thresholding. Defaults to True.
         bin_mask (bool, optional): Whether to binarize the output map. Defaults to False.
         return_data (bool, optional): Whether to return the map data. Defaults to False.
 
@@ -420,17 +454,47 @@ def pdb2vol(
 
     blurred_data = resample_by_box_size(blurred_data, dims)
 
+    # # 输出归一化前的blurred_data统计信息
+    # min_val = np.min(blurred_data)
+    # max_val = np.max(blurred_data)
+    # mean_val = np.mean(blurred_data)
+    # std_val = np.std(blurred_data)
+    # print(f"归一化前的blurred_data统计信息: 最小值={min_val:.6f}, 最大值={max_val:.6f}, 均值={mean_val:.6f}, 标准差={std_val:.6f}")
+
     if normalize:
         blurred_data = normalize_map(blurred_data)
+        # 输出归一化后的统计信息
+        min_val = np.min(blurred_data)
+        max_val = np.max(blurred_data)
+        mean_val = np.mean(blurred_data)
+        std_val = np.std(blurred_data)
+        print(f"归一化后的blurred_data统计信息: 最小值={min_val:.6f}, 最大值={max_val:.6f}, 均值={mean_val:.6f}, 标准差={std_val:.6f}")
+        
+        # 计算正负值比例
+        positive_pct = np.sum(blurred_data > 0) / blurred_data.size * 100
+        negative_pct = np.sum(blurred_data < 0) / blurred_data.size * 100
+        print(f"正值占比: {positive_pct:.2f}%, 负值占比: {negative_pct:.2f}%")
 
-    if contour:
+    # 记录contour和bin_mask处理前的状态
+    print(f"在contour和bin_mask处理前，数据包含负值: {np.any(blurred_data < 0)}")
+    print(f"contour参数值: {contour}, apply_contour: {apply_contour}")
+    print(f"bin_mask参数值: {bin_mask}")
+
+    if contour and apply_contour:
+        print(f"执行contour处理，contour阈值: {contour}")
         blurred_data = np.where(blurred_data > contour, blurred_data, 0)
+        print(f"contour处理后，数据是否包含负值: {np.any(blurred_data < 0)}")
 
     if bin_mask:
+        print("执行bin_mask操作")
         # binarize to get a mask
         blurred_data = np.where(blurred_data > 0, 1, 0)
+        print(f"bin_mask处理后，数据是否包含负值: {np.any(blurred_data < 0)}")
 
+    # 写入MRC文件前记录最终状态
     if output_mrc is not None:
+        print(f"写入MRC文件前，数据是否包含负值: {np.any(blurred_data < 0)}")
+        print(f"写入MRC文件前，最小值: {np.min(blurred_data):.6f}")
         write_mrc_file(blurred_data, origin, voxel_size, output_mrc)
 
     if return_data:
@@ -455,6 +519,8 @@ if __name__ == "__main__":
     parser.add_argument("-b", "--bin_mask", action="store_true", default=False,
                         help="Whether to binarize the output map.")
     parser.add_argument("-c", "--contour", type=float, default=0.0, help="Contour level for contouring the output map.")
+    parser.add_argument("-ac", "--apply_contour", action="store_true", default=True,
+                        help="Whether to apply contour thresholding.")
     args = parser.parse_args()
 
     pdb2vol(
@@ -467,6 +533,7 @@ if __name__ == "__main__":
         args.normalize,
         args.backbone_only,
         args.contour,
+        args.apply_contour,
         args.bin_mask,
         False,
     )

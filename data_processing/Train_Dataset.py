@@ -56,7 +56,7 @@ class Train_Dataset(torch.utils.data.Dataset):
         print("in total we have %d training cubes" % len(self.input_path))
 
     def __len__(self):
-        print("Train_Dataset length:", len(self.input_path))
+        # print("Train_Dataset length:", len(self.input_path))
         return len(self.input_path)
 
     def __getitem__(self, idx):
@@ -69,13 +69,13 @@ class Train_Dataset(torch.utils.data.Dataset):
         atomfile = self.output_path[idx]
         input = np.load(inputfile)
         atom_label = np.load(atomfile)
-        print("input:{},atom_label:{}".format(input.shape,atom_label.shape))
+        # print("input:{},atom_label:{}".format(input.shape,atom_label.shape))
         rot = random.randint(0, 3)
         axis = random.randint(0, 2)
         if self.is_train:
             if len(input.shape) == 3:
                 input = rot90(input, rot, axis)
-                print("input:",input.shape)
+                # print("input:",input.shape)
             # else:
             #     for k in range(len(input)):
             #         # print(k)
@@ -87,7 +87,7 @@ class Train_Dataset(torch.utils.data.Dataset):
             #     atom_label[k] = rot90(atom_label[k], rot, axis)
             if len(atom_label.shape) == 3:#fix the bug
                 atom_label = rot90(atom_label, rot, axis)
-                print("atom_label:",atom_label.shape)
+                # print("atom_label:",atom_label.shape)
             # else:
             #     for k in range(len(atom_label)):
             #         # print(k)
@@ -116,7 +116,16 @@ class Train_Dataset(torch.utils.data.Dataset):
         atom_final_label = torch.cat(atom_final_label, dim=0)
         # print("input:",input.shape)
         # print("atom_label:",atom_label.shape)
-        return {'density': atom_final_input, 'backbone': atom_final_label, 'index': idx}
+        
+        # 返回数据字典，增加文件路径信息
+        return {
+            'density': atom_final_input, 
+            'backbone': atom_final_label, 
+            'index': idx,
+            'pid': self.map_dict[idx], 
+            'output_path': self.output_path[idx],
+            'density_path': self.input_path[idx]
+        }
 
 
 def basic_rot_ax(m, ax=0):
@@ -163,5 +172,3 @@ def rot90(m, k=1, axis=2):
     #     m = np.rot90(m, k)
     #     # print(111)
     return m
-
-

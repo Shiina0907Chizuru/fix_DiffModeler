@@ -118,3 +118,36 @@ def extract_compressed_file(file_path, extract_dir):
                 extract_dir = cur_dir
     print(f"Successfully extracted {file_path} to {extract_dir}")
     return extract_dir
+
+
+def clean_directory(directory_path):
+    """
+    清空指定目录中的所有文件和子目录，但保留目录本身
+    
+    Args:
+        directory_path (str): 要清空的目录路径
+        
+    Returns:
+        bool: 如果目录存在并成功清空，则返回True；否则返回False
+    """
+    if not os.path.exists(directory_path):
+        print(f"目录不存在: {directory_path}")
+        return False
+        
+    if not os.path.isdir(directory_path):
+        print(f"路径不是目录: {directory_path}")
+        return False
+        
+    try:
+        # 删除目录中的所有文件和子目录
+        for item in os.listdir(directory_path):
+            item_path = os.path.join(directory_path, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+            else:
+                os.remove(item_path)
+        print(f"目录已清空: {directory_path}")
+        return True
+    except Exception as e:
+        print(f"清空目录时出错: {e}")
+        return False

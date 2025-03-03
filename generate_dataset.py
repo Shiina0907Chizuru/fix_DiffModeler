@@ -85,24 +85,44 @@ import os
 import mrcfile
 import numpy as np
 from data_processing.generate_input_data import generate_infer_data
-from ops.os_operation import mkdir
+from ops.os_operation import mkdir, clean_directory
 
 def generate_dataset(input_map_path, label_map_path, save_dir, contour, box_size=64, stride=32):
     """
     根据输入的 .map 文件和标签 .mrc 文件生成数据集。
     """
-    # 创建保存路径
+    # 创建保存路径（如果不存在）
     mkdir(save_dir)
+    
+    # 清空保存目录中的所有文件
+    clean_directory(save_dir)
+    print(f"已清空目录: {save_dir}")
 
     # 读取并处理输入 .map 文件
     params = {"model": {"diffusion": {"box_size": box_size, "stride": stride}}}
+    # 直接使用save_dir作为输入和输出的保存路径
     Coord_Voxel, map_data, adjusted_contour = generate_infer_data(input_map_path, save_dir, contour, params)
-
-    # 分割标签 .mrc 文件
+    
+    # 分割标签 .mrc 文件并保存到同一目录
     with mrcfile.open(label_map_path, permissive=True) as label_mrc:
         label_data = np.array(label_mrc.data)
-        label_save_dir = os.path.join(save_dir)
-        mkdir(label_save_dir)
+        
+        # 对标签数据进行最大最小值归一化
+        min_value = np.min(label_data)
+        max_value = np.max(label_data)
+        
+        # 输出归一化前的统计信息
+        print(f"标签数据归一化前：最小值={min_value:.6f}, 最大值={max_value:.6f}")
+        print(f"标签数据负值比例：{np.sum(label_data < 0) / label_data.size * 100:.2f}%")
+        
+        # 执行最大最小值归一化
+        if max_value != min_value:  # 避免除零错误
+            label_data = (label_data - min_value) / (max_value - min_value)
+        else:
+            label_data = np.zeros_like(label_data)
+            
+        # 输出归一化后的统计信息
+        print(f"标签数据归一化后：最小值={np.min(label_data):.6f}, 最大值={np.max(label_data):.6f}")
 
         for i, (x, y, z) in enumerate(Coord_Voxel):
             x_end = min(x + box_size, label_data.shape[0])
@@ -110,10 +130,10 @@ def generate_dataset(input_map_path, label_map_path, save_dir, contour, box_size
             z_end = min(z + box_size, label_data.shape[2])
             segment_label = np.zeros((box_size, box_size, box_size))
             segment_label[:x_end - x, :y_end - y, :z_end - z] = label_data[x:x_end, y:y_end, z:z_end]
-            output_path = os.path.join(label_save_dir, f"output_{i}.npy")
+            output_path = os.path.join(save_dir, f"output_{i}.npy")
             np.save(output_path, segment_label)
 
-        print(f"In total we prepared {len(Coord_Voxel)} boxes as output")
+        print(f"已保存 {len(Coord_Voxel)} 个输入切片和 {len(Coord_Voxel)} 个输出切片")
     print("Dataset generated successfully.")
 
 # 原始版本的函数（已注释）

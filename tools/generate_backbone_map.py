@@ -132,17 +132,38 @@ def generate_backbone_density(input_pdb, output_mrc, resolution=1.0, backbone_on
         output_mrc=output_mrc,
         normalize=normalize,
         backbone_only=backbone_only,
-        contour=contour_level,
+        contour=None,  # 设置为None，避免执行contour操作
         ref_map=reference_map  # 使用参考密度图保持尺寸一致
     )
     print(f"已生成骨架密度图: {output_mrc}")
     
     # 显示密度图信息
     try:
-        with mrcfile.open(output_mrc, permissive=True) as mrc:
+        print(f"尝试读取生成的MRC文件: {output_mrc}")
+        with mrcfile.open(output_mrc) as mrc:
             data = mrc.data
+            min_val = np.min(data)
+            max_val = np.max(data)
+            mean_val = np.mean(data)
+            std_val = np.std(data)
             print(f"密度图大小: {data.shape}")
-            print(f"密度值范围: {np.min(data)} to {np.max(data)}")
+            print(f"密度值范围: {min_val:.6f} to {max_val:.6f}")
+            print(f"密度图统计信息: 均值={mean_val:.6f}, 标准差={std_val:.6f}")
+            print(f"检查负值: {'有' if min_val < 0 else '无'}负值")
+            print(f"MRC文件模式: {mrc.header.mode}")
+            
+            # 计算正负值比例
+            if min_val < 0:
+                positive_pct = np.sum(data > 0) / data.size * 100
+                negative_pct = np.sum(data < 0) / data.size * 100
+                print(f"正值占比: {positive_pct:.2f}%, 负值占比: {negative_pct:.2f}%")
+            
+            # 手动验证是否存在负值
+            has_negative = np.any(data < -0.001)  # 使用一个小阈值避免精度问题
+            print(f"文件中是否存在负值: {has_negative}")
+            
+            if not has_negative and min_val >= 0 and mean_val > 0.1:
+                print("警告: MRC文件可能未保存负值，请检查write_mrc_file函数实现")
     except Exception as e:
         print(f"读取密度图信息时出错: {e}")
     
@@ -323,9 +344,9 @@ def main():
             ]
             
             for pattern in possible_patterns:
-                matching_files = glob.glob(pattern)
-                if matching_files:
-                    args.pdb = matching_files[0]
+                pdb_files = glob.glob(pattern)
+                if pdb_files:
+                    args.pdb = pdb_files[0]
                     print(f"找到替代PDB文件: {args.pdb}")
                     break
         

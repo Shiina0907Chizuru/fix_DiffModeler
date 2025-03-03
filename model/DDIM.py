@@ -51,7 +51,7 @@ class DDIM(Base_DDIM):
         logger.info(
             'Network G structure: {}, with parameters: {:,d}'.format(net_struc_str, n))
         logger.info(s)
-    def optimize_parameters(self):
+    def optimize_parameters(self, trouble_log=False, log_path=None, batch_idx=None):
         self.optG.zero_grad()
         l_pix,x_recon,x_target = self.netG(self.data)
         l_pix = l_pix.mean()
@@ -62,6 +62,11 @@ class DDIM(Base_DDIM):
 
         iou_val = iou(x_recon.sigmoid()>=0.5,x_target>0.5).mean()
         self.log_dict['iou'] = iou_val.item()
+        
+        # 记录问题数据的详细信息
+        if trouble_log and log_path is not None and (l_pix.item() > 0.9999 or iou_val.item() < 0.0001):
+            self._log_trouble_data(log_path, batch_idx, l_pix.item(), x_recon, x_target, iou_val.item())
+            
         return self.log_dict
 
     def calculate_loss(self):
@@ -92,3 +97,41 @@ class DDIM(Base_DDIM):
                 self.SR = self.netG.super_resolution(
                 self.data['density'], continous)
         self.netG.train()
+
+    def _log_trouble_data(self, log_path, batch_idx, loss_value, x_recon, x_target, iou_value):
+        """记录问题数据的详细信息到日志文件"""
+        with open(log_path, 'a') as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"Problematic batch detected at batch_idx: {batch_idx}, loss: {loss_value:.6f}, iou: {iou_value:.6f}\n")
+            
+            # 记录输入数据信息
+            if 'pid' in self.data:
+                # 如果pid是列表或批次，记录整个批次的ID
+                pids = self.data['pid']
+                if isinstance(pids, list):
+                    f.write(f"Protein IDs in batch: {', '.join(pids)}\n")
+                else:
+                    f.write(f"Protein ID: {pids}\n")
+            
+            # 记录output.npy文件路径信息
+            if 'output_path' in self.data:
+                output_paths = self.data['output_path']
+                if isinstance(output_paths, list):
+                    f.write(f"Output.npy paths:\n")
+                    for i, path in enumerate(output_paths):
+                        f.write(f"  [{i}] {path}\n")
+                else:
+                    f.write(f"Output.npy path: {output_paths}\n")
+                
+            # 计算并记录sigmoid后的重建数据
+            x_recon_sigmoid = torch.sigmoid(x_recon)
+            f.write(f"Reconstructed data stats (after sigmoid):\n")
+            f.write(f"  Min value: {x_recon_sigmoid.min().item():.6f}\n")
+            f.write(f"  Max value: {x_recon_sigmoid.max().item():.6f}\n")
+            f.write(f"  Mean value: {x_recon_sigmoid.mean().item():.6f}\n")
+            
+            # 输出完整的sigmoid后数据
+            f.write(f"Full sigmoid data:\n")
+            # 将张量转换为numpy数组并格式化输出
+            sigmoid_array = x_recon_sigmoid.cpu().detach().numpy()
+            f.write(f"{sigmoid_array}\n")

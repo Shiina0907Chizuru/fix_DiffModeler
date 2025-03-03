@@ -4,6 +4,7 @@ import os
 from ops.map_utils import find_top_density,permute_ns_coord_to_pdb
 from progress.bar import Bar
 from ops.os_operation import mkdir
+
 def gen_input_box(map_data,box_size,stride,contour,train_save_path):
     scan_x, scan_y, scan_z = map_data.shape
     count_voxel = 0
@@ -12,6 +13,12 @@ def gen_input_box(map_data,box_size,stride,contour,train_save_path):
 
     bar = Bar('Preparing Input: ', max=int(np.ceil(scan_x/stride)*np.ceil(scan_y/stride)*np.ceil(scan_z/stride)))
 
+    # 统计和输出数据分布
+    has_negative = np.any(map_data < 0)
+    if has_negative:
+        neg_count = np.sum(map_data < 0)
+        neg_percent = (neg_count / map_data.size) * 100
+        print(f"切片前数据包含{neg_count}个负值，占比{neg_percent:.2f}%")
 
     for x in range(0, scan_x, stride):
         x_end = min(x + box_size, scan_x)
@@ -46,19 +53,31 @@ def gen_input_box(map_data,box_size,stride,contour,train_save_path):
                 #already normalized
                 segment_map_voxel = np.zeros([box_size,box_size,box_size])
                 segment_map_voxel[:x_end-x_start,:y_end-y_start,:z_end-z_start]=map_data[x_start:x_end, y_start:y_end, z_start:z_end]
+                
+                # 检查当前切片块是否包含负值
+                has_neg_in_segment = np.any(segment_map_voxel < 0)
+                
                 if contour<=0:
                     meaningful_density_count = len(np.argwhere(segment_map_voxel>0))
                     meaningful_density_ratio = meaningful_density_count/float(box_size**3)
-                    if meaningful_density_ratio<=0.001:
+                    if meaningful_density_ratio<=0.001 and not has_neg_in_segment:
                         #print("no meaningful density ratio %f in current scanned box, skip it!"%meaningful_density_ratio)
                         continue
                 else:
                     meaningful_density_count = len(np.argwhere(segment_map_voxel > contour))
                     meaningful_density_ratio = meaningful_density_count / float(box_size ** 3)
-                    if meaningful_density_ratio <= 0.001:
+                    if meaningful_density_ratio <= 0.001 and not has_neg_in_segment:
                        # print("no meaningful density ratio in current scanned box, skip it!")
                         continue
                 cur_path = os.path.join(train_save_path,"input_"+str(count_voxel)+".npy")
+                
+                # 保存切片前记录是否包含负值
+                if has_neg_in_segment:
+                    neg_count_in_segment = np.sum(segment_map_voxel < 0)
+                    neg_percent_in_segment = (neg_count_in_segment / segment_map_voxel.size) * 100
+                    if count_voxel < 10:  # 只记录前10个切片以避免过多输出
+                        print(f"切片{count_voxel}包含{neg_count_in_segment}个负值，占比{neg_percent_in_segment:.2f}%")
+                
                 np.save(cur_path,segment_map_voxel)
                 Coord_Voxel.append([x_start,y_start,z_start])
                 count_voxel+=1
@@ -66,7 +85,18 @@ def gen_input_box(map_data,box_size,stride,contour,train_save_path):
     Coord_Voxel = np.array(Coord_Voxel)
     coord_path = os.path.join(train_save_path,"Coord.npy")
     np.save(coord_path,Coord_Voxel)
-    print("In total we prepared %d boxes as input"%(len(Coord_Voxel)))
+    
+    # 统计最终保存的切片中负值情况
+    neg_slice_count = 0
+    for i in range(len(Coord_Voxel)):
+        slice_path = os.path.join(train_save_path, f"input_{i}.npy")
+        if os.path.exists(slice_path):
+            slice_data = np.load(slice_path)
+            if np.any(slice_data < 0):
+                neg_slice_count += 1
+    
+    print(f"In total we prepared {len(Coord_Voxel)} boxes as input")
+    print(f"其中包含负值的切片数量: {neg_slice_count}，占比: {neg_slice_count/len(Coord_Voxel)*100:.2f}%")
     return Coord_Voxel
 
 def generate_infer_data(input_map_path,save_input_dir,contour,params):
@@ -77,9 +107,23 @@ def generate_infer_data(input_map_path,save_input_dir,contour,params):
     with mrcfile.open(input_map_path, permissive=True) as map_mrc:
          #normalize data
         map_data = np.array(map_mrc.data)
-        # get the value serve as 1 in normalization
-        map_data[map_data < 0] = 0
-        print("map density range: %f %f"%(0,np.max(map_data)))
+        # 输出原始数据统计信息
+        min_orig = np.min(map_data)
+        max_orig = np.max(map_data)
+        mean_orig = np.mean(map_data)
+        std_orig = np.std(map_data)
+        print(f"原始地图数据统计: 最小值={min_orig:.6f}, 最大值={max_orig:.6f}, 均值={mean_orig:.6f}, 标准差={std_orig:.6f}")
+        
+        # 检查是否有负值
+        has_negative = np.any(map_data < 0)
+        if has_negative:
+            neg_count = np.sum(map_data < 0)
+            neg_percent = (neg_count / map_data.size) * 100
+            print(f"原始数据中包含{neg_count}个负值，占比{neg_percent:.2f}%")
+            
+        # 保留负值，不再执行: map_data[map_data < 0] = 0
+        
+        print("map density range: %f %f"%(np.min(map_data),np.max(map_data)))
         percentile_98 = find_top_density(map_data,0.98)
 
         print("map hist log percentage 98: ",percentile_98)
