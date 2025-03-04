@@ -135,3 +135,14 @@ class DDIM(Base_DDIM):
             # 将张量转换为numpy数组并格式化输出
             sigmoid_array = x_recon_sigmoid.cpu().detach().numpy()
             f.write(f"{sigmoid_array}\n")
+            
+            # 新增：记录目标数据 (x_target) 的统计信息
+            f.write(f"\nTarget data stats:\n")
+            f.write(f"  Min value: {x_target.min().item():.6f}\n")
+            f.write(f"  Max value: {x_target.max().item():.6f}\n")
+            f.write(f"  Mean value: {x_target.mean().item():.6f}\n")
+            
+            # 新增：输出完整的目标数据
+            f.write(f"Full target data:\n")
+            target_array = x_target.cpu().detach().numpy()
+            f.write(f"{target_array}\n")
