@@ -3,14 +3,14 @@ import logging
 from model.UNet3D import UNet3D, UKAN3D
 from model.GeneralDiffusion import GeneralDiffusion
 from model.model_utils import init_weights
+from model.UMLP3D import UMLP3D
 
 def get_network_class(network_type):
-    if network_type.lower() == 'unet3d':
-        return UNet3D
-    elif network_type.lower() == 'ukan3d':
-        return UKAN3D
-    else:
-        raise ValueError(f"Unknown network type: {network_type}")
+    # 导入这里以确保从UNet3D模块获取最新定义的函数
+    from model.UNet3D import get_network_class as unet3d_get_network_class
+    
+    # 使用UNet3D模块中定义的函数
+    return unet3d_get_network_class(network_type)
 
 def define_G(opt):
     model_opt = opt['model']
@@ -62,5 +62,3 @@ def define_G(opt):
 
     init_weights(netG, init_type='orthogonal')
     return netG
-
-

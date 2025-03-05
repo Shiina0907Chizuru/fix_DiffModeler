@@ -7,7 +7,7 @@
     "model": {
       "path": "best_model/diffusion_best.pth.tar",
       "unet": {
-            "network_type": "ukan3d", //unet3d or ukan3d
+            "network_type": "umlp3d", //unet3d or ukan3d
             "in_channel": 3,
             "out_channel": 1,
             "inner_channel": 32,

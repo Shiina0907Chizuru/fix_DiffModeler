@@ -59,21 +59,41 @@ def weights_init_kaiming(m, scale=1):
 
 def weights_init_orthogonal(m):
     classname = m.__class__.__name__
+    
+    # 跳过一些主模型类，它们不需要直接初始化
+    if classname in ['UNet3D', 'UKAN3D', 'UNet_ConvKan3D', 'UMLP3D']:
+        return
+        
     if classname.find('Conv') != -1:
-        init.orthogonal_(m.weight.data, gain=1)
-        if m.bias is not None:
-            m.bias.data.zero_()
+        # 对于FastKANConvLayer3D类特殊处理
+        if classname == 'FastKANConvLayer3D':
+            if hasattr(m, 'conv') and hasattr(m.conv, 'weight'):
+                init.orthogonal_(m.conv.weight.data, gain=1)
+                if hasattr(m.conv, 'bias') and m.conv.bias is not None:
+                    m.conv.bias.data.zero_()
+            if hasattr(m, 'base_conv') and hasattr(m.base_conv, 'weight'):
+                init.orthogonal_(m.base_conv.weight.data, gain=1)
+                if hasattr(m.base_conv, 'bias') and m.base_conv.bias is not None:
+                    m.base_conv.bias.data.zero_()
+        else:
+            if hasattr(m, 'weight'):
+                init.orthogonal_(m.weight.data, gain=1)
+                if m.bias is not None:
+                    m.bias.data.zero_()
     elif classname.find('Linear') != -1:
-        init.orthogonal_(m.weight.data, gain=1)
-        if m.bias is not None:
-            m.bias.data.zero_()
+        if hasattr(m, 'weight'):
+            init.orthogonal_(m.weight.data, gain=1)
+            if m.bias is not None:
+                m.bias.data.zero_()
     elif classname.find('BatchNorm2d') != -1:
-        init.constant_(m.weight.data, 1.0)
-        init.constant_(m.bias.data, 0.0)
+        if hasattr(m, 'weight'):
+            init.constant_(m.weight.data, 1.0)
+            init.constant_(m.bias.data, 0.0)
     elif classname.find('NewModule') != -1:
-        init.constant_(m.weight.data, 0.0)
-        if m.bias is not None:
-            m.bias.data.zero_()
+        if hasattr(m, 'weight'):
+            init.constant_(m.weight.data, 0.0)
+            if m.bias is not None:
+                m.bias.data.zero_()
 
 
 def init_weights(net, init_type='kaiming', scale=1, std=0.02):

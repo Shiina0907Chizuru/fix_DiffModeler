@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from inspect import isfunction
 import torch.nn.functional as F
+from typing import List, Tuple, Union
 
 def exists(x):
     return x is not None
@@ -27,6 +28,10 @@ class PositionalEncoding(nn.Module):
         :param noise_level: B*C
         :return:
         """
+        # 确保noise_level不为None
+        if noise_level is None:
+            raise ValueError("noise_level cannot be None in PositionalEncoding")
+            
         count = self.dim // 2
         step = torch.arange(count, dtype=noise_level.dtype,
                             device=noise_level.device) / count
@@ -575,28 +580,30 @@ class UKAN3D(nn.Module):
         x: (B, C, D, H, W)
         time: (B, 1)
         """
-        if exists(self.noise_level_mlp) and exists(time):
-            time_emb = self.noise_level_mlp(time)
-        else:
-            time_emb = None
+        if time is None:
+            # 如果没有提供时间信息，使用零张量
+            batch_size = x.shape[0]
+            time = torch.zeros((batch_size,), device=x.device)
+            
+        t = self.noise_level_mlp(time) if exists(self.noise_level_mlp) else None
 
         feats = []
         for layer in self.downs:
             if isinstance(layer, (ResnetBlocWithAttn, TokKANBlock3D)):
-                x = layer(x, time_emb)
+                x = layer(x, t)
             else:
                 x = layer(x)
             feats.append(x)
 
         for layer in self.mid:
-            x = layer(x, time_emb)
+            x = layer(x, t)
 
         for layer in self.ups:
-            if isinstance(layer, (Upsample, Downsample)):
+            if isinstance(layer, Upsample):
                 x = layer(x)
             else:
                 x = torch.cat((x, feats.pop()), dim=1)
-                x = layer(x, time_emb)
+                x = layer(x, t)
 
         return self.final_conv(x)
 
@@ -678,6 +685,11 @@ class UNet3D(nn.Module):
 
     def forward(self, x, time=None):
         #time here is the gamma
+        if time is None:
+            # 如果没有提供时间信息，使用零张量
+            batch_size = x.shape[0]
+            time = torch.zeros((batch_size,), device=x.device)
+            
         t = self.noise_level_mlp(time) if exists(
             self.noise_level_mlp) else None
 
@@ -1027,7 +1039,7 @@ class UNet3D(nn.Module):
 #         self.norm2 = nn.GroupNorm(norm_groups, dim_out)
 #         self.shortcut = nn.Conv3d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
-#     def forward(self, x, time_emb=None):
+#     def forward(self, x, time_emb):
 #         h = self.norm1(x)
 #         h = self.kan(h)
 #         h = self.norm2(h)
@@ -1036,3 +1048,256 @@ class UNet3D(nn.Module):
 #             h = self.noise_func(h, time_emb)
 
 #         return h + self.shortcut(x)
+
+# 3D版本的FastKANConvLayer
+class FastKANConvLayer3D(nn.Module):
+    def __init__(self, 
+                 in_channels: int, 
+                 out_channels: int, 
+                 kernel_size: Union[int, Tuple[int, int, int]] = 3,
+                 stride: Union[int, Tuple[int, int, int]] = 1, 
+                 padding: Union[int, Tuple[int, int, int]] = 1, 
+                 dilation: Union[int, Tuple[int, int, int]] = 1,
+                 groups: int = 1, 
+                 bias: bool = True, 
+                 grid_min: float = -2., 
+                 grid_max: float = 2.,
+                 num_grids: int = 4, 
+                 use_base_update: bool = True, 
+                 base_activation = None,
+                 spline_weight_init_scale: float = 0.1, 
+                 padding_mode: str = "zeros",
+                 kan_type: str = "BSpline"
+                 ) -> None:
+        
+        super().__init__()
+        # 创建3D版本的KAN激活函数
+        self.rbf = KANActivation3D(grid_size=num_grids, order=3)
+        
+        # 简化实现，使用常规卷积层
+        self.conv = nn.Conv3d(in_channels, out_channels, 
+                              kernel_size, stride, padding, 
+                              dilation, groups, bias, padding_mode)
+        
+        # 初始化权重
+        nn.init.normal_(self.conv.weight, mean=0, std=0.02)
+        if bias:
+            nn.init.zeros_(self.conv.bias)
+        
+        self.use_base_update = use_base_update
+        if use_base_update:
+            self.base_activation = base_activation if base_activation else Swish()
+            self.base_conv = nn.Conv3d(in_channels, 
+                                      out_channels, 
+                                      kernel_size, 
+                                      stride, 
+                                      padding, 
+                                      dilation, 
+                                      groups, 
+                                      bias, 
+                                      padding_mode)
+
+    def forward(self, x):
+        # 应用KAN激活作为非线性函数
+        b, c, d, h, w = x.shape
+        x_flat = x.reshape(b, c, -1)
+        x_activated = self.rbf(x_flat)
+        # 这里只取第一个输出通道作为激活结果
+        # 避免维度扩展问题
+        x_activated = x_activated.reshape(b, c, d, h, w)
+        
+        # 应用卷积
+        out = self.conv(x_activated)
+        
+        # 可选的残差连接
+        if self.use_base_update:
+            base = self.base_conv(self.base_activation(x))
+            return out + base
+        
+        return out
+
+# ResBlock的KAN版本
+class ResBlockKAN3D(nn.Module):
+    def __init__(self, dim, dim_out,
+                 noise_level_emb_dim=None, dropout=0,
+                 use_affine_level=False, norm_groups=32):
+        super().__init__()
+        if noise_level_emb_dim is not None:
+            self.noise_func = FeatureWiseAffine(
+                noise_level_emb_dim, dim_out, use_affine_level)
+        else:
+            self.noise_func = None
+            
+        # 使用FastKANConvLayer3D替代Block
+        self.kan_block1 = FastKANConvLayer3D(dim, dim_out, 
+                                            kernel_size=3, 
+                                            padding=1, 
+                                            num_grids=5)
+                                            
+        self.norm1 = nn.GroupNorm(norm_groups, dim_out)
+        
+        self.kan_block2 = FastKANConvLayer3D(dim_out, dim_out, 
+                                            kernel_size=3, 
+                                            padding=1, 
+                                            num_grids=5)
+                                            
+        self.norm2 = nn.GroupNorm(norm_groups, dim_out)
+        self.dropout = nn.Dropout(dropout)
+        self.res_conv = nn.Conv3d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+
+    def forward(self, x, time_emb):
+        h = self.kan_block1(x)
+        h = self.norm1(h)
+        
+        if self.noise_func is not None and time_emb is not None:
+            h = self.noise_func(h, time_emb)
+            
+        h = self.kan_block2(h)
+        h = self.norm2(h)
+        h = self.dropout(h)
+
+        return h + self.res_conv(x)
+
+# ResnetBlocWithAttn的KAN版本
+class ResnetBlockWithAttnKAN3D(nn.Module):
+    def __init__(self, dim, dim_out, *, noise_level_emb_dim=None, norm_groups=32, dropout=0, with_attn=False):
+        super().__init__()
+        self.with_attn = with_attn
+        self.res_block = ResBlockKAN3D(
+            dim, dim_out, noise_level_emb_dim, norm_groups=norm_groups, dropout=dropout)
+        if with_attn:
+            self.attn = SelfAttention(dim_out, norm_groups=norm_groups)
+
+    def forward(self, x, time_emb):
+        x = self.res_block(x, time_emb)
+        if self.with_attn:
+            x = self.attn(x)
+        return x
+
+# UNet_ConvKan3D实现
+class UNet_ConvKan3D(nn.Module):
+    def __init__(
+            self,
+            in_channel=2,
+            out_channel=1,
+            inner_channel=32,
+            norm_groups=32,
+            channel_mults=(1, 2, 4, 8, 8),
+            attn_res=(8),
+            res_blocks=3,
+            dropout=0,
+            with_noise_level_emb=True,
+            box_size=64,
+        ):
+        super().__init__()
+        if with_noise_level_emb:
+            noise_level_channel = inner_channel
+            self.noise_level_mlp = nn.Sequential(
+                PositionalEncoding(inner_channel),
+                nn.Linear(inner_channel, inner_channel * 4),
+                Swish(),
+                nn.Linear(inner_channel * 4, inner_channel)
+            )
+        else:
+            noise_level_channel = None
+            self.noise_level_mlp = None
+            
+        num_mults = len(channel_mults)
+        pre_channel = inner_channel
+        feat_channels = [pre_channel]
+        now_res = box_size
+        
+        # 初始卷积层，使用普通Conv3d
+        downs = [nn.Conv3d(in_channel, inner_channel, kernel_size=3, padding=1)]
+        
+        # 下采样路径
+        for ind in range(num_mults):
+            is_last = (ind == num_mults - 1)
+            use_attn = (now_res in attn_res)
+            channel_mult = inner_channel * channel_mults[ind]
+            
+            for _ in range(0, res_blocks):
+                downs.append(ResnetBlockWithAttnKAN3D(
+                    pre_channel, channel_mult, noise_level_emb_dim=noise_level_channel,
+                    norm_groups=norm_groups, dropout=dropout, with_attn=use_attn))
+                feat_channels.append(channel_mult)
+                pre_channel = channel_mult
+                
+            if not is_last:
+                downs.append(Downsample(pre_channel))
+                feat_channels.append(pre_channel)
+                now_res = now_res//2
+        
+        self.downs = nn.ModuleList(downs)
+        
+        # 中间块
+        self.mid = nn.ModuleList([
+            ResnetBlockWithAttnKAN3D(pre_channel, pre_channel, noise_level_emb_dim=noise_level_channel, norm_groups=norm_groups,
+                           dropout=dropout, with_attn=True),
+            ResnetBlockWithAttnKAN3D(pre_channel, pre_channel, noise_level_emb_dim=noise_level_channel, norm_groups=norm_groups,
+                           dropout=dropout, with_attn=False)
+        ])
+        
+        # 上采样路径
+        ups = []
+        for ind in reversed(range(num_mults)):
+            is_last = (ind < 1)
+            use_attn = (now_res in attn_res)
+            channel_mult = inner_channel * channel_mults[ind]
+            
+            for _ in range(0, res_blocks+1):
+                ups.append(ResnetBlockWithAttnKAN3D(
+                    pre_channel+feat_channels.pop(), channel_mult, noise_level_emb_dim=noise_level_channel, norm_groups=norm_groups,
+                    dropout=dropout, with_attn=use_attn))
+                pre_channel = channel_mult
+                
+            if not is_last:
+                ups.append(Upsample(pre_channel))
+                now_res = now_res*2
+        
+        self.ups = nn.ModuleList(ups)
+        
+        self.final_conv = Block(pre_channel, default(out_channel, in_channel), groups=norm_groups)
+        
+    def forward(self, x, time=None):
+        """
+        x: (B, C, D, H, W)
+        time: (B, 1)
+        """
+        if time is not None and self.noise_level_mlp is not None:
+            t_emb = self.noise_level_mlp(time)
+        else:
+            t_emb = None
+
+        feats = []
+        for layer in self.downs:
+            if isinstance(layer, ResnetBlockWithAttnKAN3D):
+                x = layer(x, t_emb)
+            else:
+                x = layer(x)
+            feats.append(x)
+
+        for layer in self.mid:
+            x = layer(x, t_emb)
+
+        for layer in self.ups:
+            if isinstance(layer, ResnetBlockWithAttnKAN3D):
+                x = layer(torch.cat((x, feats.pop()), dim=1), t_emb)
+            else:
+                x = layer(x)
+
+        return self.final_conv(x)
+
+# 更新get_network_class函数，添加对UMLP3D的支持
+def get_network_class(network_type):
+    if network_type.lower() == 'unet3d':
+        return UNet3D
+    elif network_type.lower() == 'ukan3d':
+        return UKAN3D
+    elif network_type.lower() == 'unet_convkan3d':
+        return UNet_ConvKan3D
+    elif network_type.lower() == 'umlp3d':
+        from model.UMLP3D import UMLP3D
+        return UMLP3D
+    else:
+        raise ValueError(f"Unknown network type: {network_type}")
