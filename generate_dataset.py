@@ -107,11 +107,9 @@ def generate_dataset(input_map_path, label_map_path, save_dir, contour, box_size
     with mrcfile.open(label_map_path, permissive=True) as label_mrc:
         label_data = np.array(label_mrc.data)
         
-        # 对标签数据进行最大最小值归一化
+        # 输出归一化前的统计信息
         min_value = np.min(label_data)
         max_value = np.max(label_data)
-        
-        # 输出归一化前的统计信息
         print(f"标签数据归一化前：最小值={min_value:.6f}, 最大值={max_value:.6f}")
         print(f"标签数据负值比例：{np.sum(label_data < 0) / label_data.size * 100:.2f}%")
         
@@ -123,7 +121,7 @@ def generate_dataset(input_map_path, label_map_path, save_dir, contour, box_size
             
         # 输出归一化后的统计信息
         print(f"标签数据归一化后：最小值={np.min(label_data):.6f}, 最大值={np.max(label_data):.6f}")
-
+        
         for i, (x, y, z) in enumerate(Coord_Voxel):
             x_end = min(x + box_size, label_data.shape[0])
             y_end = min(y + box_size, label_data.shape[1])
@@ -132,7 +130,7 @@ def generate_dataset(input_map_path, label_map_path, save_dir, contour, box_size
             segment_label[:x_end - x, :y_end - y, :z_end - z] = label_data[x:x_end, y:y_end, z:z_end]
             output_path = os.path.join(save_dir, f"output_{i}.npy")
             np.save(output_path, segment_label)
-
+            
         print(f"已保存 {len(Coord_Voxel)} 个输入切片和 {len(Coord_Voxel)} 个输出切片")
     print("Dataset generated successfully.")
 
@@ -172,7 +170,8 @@ def process_from_file(input_file):
     从文本文件中读取蛋白质信息并生成数据集。
     适配新的目录结构版本。
     """
-    base_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\trainpdb_emdb_data"
+    # base_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\trainpdb_emdb_data"
+    base_path = r"/defaultShare/zcan-library/Diffmodeler_data/20250306dataset/origin"
 
     with open(input_file, 'r') as file:
         for line in file:
@@ -183,7 +182,7 @@ def process_from_file(input_file):
             try:
                 protein_name, contour_level = line.split(':')
                 contour_level = float(contour_level)
-                protein_folder = f"PDB-{protein_name.upper()}-EMD-*"  # 使用通配符匹配EMD编号
+                protein_folder = f"PDB-{protein_name.lower()}-EMD-*"  # 使用通配符匹配EMD编号
                 
                 # 使用glob找到匹配的文件夹
                 import glob

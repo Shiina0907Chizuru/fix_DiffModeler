@@ -34,6 +34,8 @@ def my_reform_1a(input_mrc, output_mrc, use_gpu=False):
                         shutil.copy2(input_mrc, output_mrc)
                         return
                     
+                    # 修复字节序问题：确保数据为本地字节序
+                    orig_data = np.array(orig_data, dtype=np.float32, copy=True)
                     orig_data = torch.from_numpy(orig_data).unsqueeze(0).unsqueeze(0)
                 except Exception as e:
                     print(f"Error converting data: {str(e)}")
@@ -102,11 +104,40 @@ def my_reform_1a(input_mrc, output_mrc, use_gpu=False):
         shutil.copy2(input_mrc, output_mrc)
 
 def Resize_Map(input_map_path,new_map_path):
+    # 确保shutil已导入
+    import shutil
     try:
-        my_reform_1a(input_map_path, new_map_path, use_gpu=True)
-    except:
-        print("GPU reform failed, falling back to CPU")
-        my_reform_1a(input_map_path, new_map_path, use_gpu=False)
+        # 检查输入文件是否存在
+        if not os.path.exists(input_map_path):
+            print(f"Error: Input file {input_map_path} does not exist")
+            return input_map_path
+            
+        # 确保输出目录存在
+        output_dir = os.path.dirname(new_map_path)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+            
+        try:
+            my_reform_1a(input_map_path, new_map_path, use_gpu=True)
+        except Exception as e:
+            print(f"GPU reform failed ({str(e)}), falling back to CPU")
+            my_reform_1a(input_map_path, new_map_path, use_gpu=False)
+            
+        # 验证输出文件
+        if not os.path.exists(new_map_path):
+            print(f"Error: Output file {new_map_path} was not created")
+            if os.path.exists(input_map_path):
+                print(f"Copying original file as fallback")
+                shutil.copy2(input_map_path, new_map_path)
+                
+    except Exception as e:
+        print(f"Error in Resize_Map: {str(e)}")
+        # 如果处理失败，尝试直接复制输入文件
+        if os.path.exists(input_map_path):
+            if os.path.dirname(new_map_path) and not os.path.exists(os.path.dirname(new_map_path)):
+                os.makedirs(os.path.dirname(new_map_path), exist_ok=True)
+            shutil.copy2(input_map_path, new_map_path)
+            
     return new_map_path
 
 if __name__ == "__main__":

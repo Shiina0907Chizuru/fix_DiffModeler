@@ -2,6 +2,7 @@
 
 from Bio.PDB import PDBParser, MMCIFParser
 import numpy as np
+import os
 
 import mrcfile
 from scipy.ndimage import fourier_gaussian, gaussian_filter, zoom
@@ -38,39 +39,420 @@ def get_atom_list(pdb_file, backbone_only=False):
 
     Parameters:
     pdb_file (str): The path to the PDB or CIF file.
+    backbone_only (bool): If True, only backbone atoms will be extracted.
 
     Returns:
     tuple: A tuple containing two elements:
         - np.array: An array of atom coordinates.
         - list: A list of atom types.
+        
+    Raises:
+    ValueError: If the file extension is not recognized or if the file cannot be parsed.
     """
-    if pdb_file.endswith(".pdb"):
-        st_parser = PDBParser(QUIET=True)
-    elif pdb_file.endswith(".cif"):
-        st_parser = MMCIFParser(QUIET=True)
-    structure = st_parser.get_structure("protein", pdb_file)
+    # 使用小写扩展名进行检查，确保大小写不敏感
+    file_ext = os.path.splitext(pdb_file)[1].lower()
+    
+    try:
+        # 首先尝试使用BioPython的解析器处理文件
+        try:
+            if file_ext == ".pdb":
+                st_parser = PDBParser(QUIET=True)
+                print(f"使用PDBParser解析文件: {pdb_file}")
+            elif file_ext == ".cif":
+                st_parser = MMCIFParser(QUIET=True)
+                print(f"使用MMCIFParser解析文件: {pdb_file}")
+            else:
+                raise ValueError(f"不支持的文件类型: {file_ext}，只支持.pdb和.cif格式")
+                
+            structure = st_parser.get_structure("protein", pdb_file)
+            atom_list = []
+            atom_type_list = List()
+
+            if backbone_only:
+                print("只提取骨架原子...")
+                for model in structure:
+                    for chain in model:
+                        for residue in chain:
+                            try:
+                                if "CA" in residue:
+                                    atom_list.append(residue["CA"].get_coord())
+                                    atom_type_list.append(residue["CA"].element)
+                                    if "C" in residue:
+                                        atom_list.append(residue["C"].get_coord())
+                                        atom_type_list.append(residue["C"].element)
+                                    if "N" in residue:
+                                        atom_list.append(residue["N"].get_coord())
+                                        atom_type_list.append(residue["N"].element)
+                            except Exception as e:
+                                print(f"处理残基时出错，跳过: {e}")
+                                continue
+            else:
+                print("提取所有原子...")
+                for atom in structure.get_atoms():
+                    try:
+                        atom_list.append(atom.get_coord())
+                        atom_type_list.append(atom.element)
+                    except Exception as e:
+                        print(f"处理原子时出错，跳过: {e}")
+                        continue
+                    
+            print(f"提取了{len(atom_list)}个原子")
+            
+            if len(atom_list) == 0:
+                raise ValueError("未能从文件中提取任何原子")
+            
+            return np.array(atom_list), atom_type_list
+            
+        except Exception as primary_error:
+            # BioPython解析失败，尝试备用方法
+            print(f"BioPython解析失败: {primary_error}")
+            print("尝试使用备用方法解析文件...")
+            
+            # 备用方法：直接解析PDB/CIF文件
+            if file_ext == ".pdb":
+                return parse_pdb_file_manually(pdb_file, backbone_only)
+            elif file_ext == ".cif":
+                return parse_cif_file_manually(pdb_file, backbone_only)
+            else:
+                raise ValueError(f"不支持的文件类型: {file_ext}")
+        
+    except Exception as e:
+        print(f"解析文件{pdb_file}时出错: {e}")
+        raise ValueError(f"无法解析{file_ext}文件: {e}")
+
+
+def parse_pdb_file_manually(pdb_file, backbone_only=False):
+    """手动解析PDB文件，提取原子坐标和类型"""
+    print(f"尝试手动解析PDB文件: {pdb_file}")
+    backbone_atoms = ["CA", "C", "N"]  # 只保留蛋白质主链原子
+    # 移除RNA/DNA主链原子: P, O5', C5', C4', O4', C3', O3', C2', O2', C1'
     atom_list = []
     atom_type_list = List()
+    
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(pdb_file):
+            raise ValueError(f"文件不存在: {pdb_file}")
+            
+        # 检查文件大小
+        if os.path.getsize(pdb_file) == 0:
+            raise ValueError(f"文件为空: {pdb_file}")
+        
+        # 读取文件内容
+        with open(pdb_file, 'r', errors='ignore') as f:
+            lines = f.readlines()
+            
+        # 检查是否有ATOM行
+        atom_lines = [line for line in lines if line.startswith("ATOM") or line.startswith("HETATM")]
+        if not atom_lines:
+            print(f"警告: 在PDB文件中没有找到ATOM或HETATM行: {pdb_file}")
+            print("尝试使用第二种方法解析...")
+            
+            # 尝试更宽松的解析方法 - 查找包含原子信息的行
+            atomic_data_lines = []
+            for line in lines:
+                # 查找可能包含原子数据的行 - 通常有3个浮点数(坐标)
+                # 使用正则表达式查找包含数字和小数点的模式
+                import re
+                float_pattern = r'[-+]?\d*\.\d+'
+                floats = re.findall(float_pattern, line)
+                if len(floats) >= 3:  # 至少包含3个浮点数
+                    atomic_data_lines.append(line)
+            
+            if not atomic_data_lines:
+                raise ValueError(f"文件中未找到任何可能的原子坐标数据: {pdb_file}")
+                
+            # 从这些行中提取坐标
+            for line in atomic_data_lines:
+                try:
+                    # 使用正则表达式查找浮点数
+                    import re
+                    floats = re.findall(r'[-+]?\d*\.\d+', line)
+                    if len(floats) >= 3:
+                        x = float(floats[0])
+                        y = float(floats[1])
+                        z = float(floats[2])
+                        
+                        # 尝试从行中提取元素类型
+                        element = "C"  # 默认为碳
+                        # 查找常见原子类型
+                        for atom_type in ["CA", "C", "N", "O", "P", "S", "H"]:
+                            if atom_type in line:
+                                element = atom_type[0]
+                                break
+                                
+                        atom_list.append([x, y, z])
+                        atom_type_list.append(element)
+                except Exception as e:
+                    print(f"处理原子数据行时出错，跳过: {e}")
+                    continue
+        else:
+            # 标准PDB文件解析
+            for line in atom_lines:
+                try:
+                    # 确保行长度足够
+                    if len(line) < 54:  # 最小长度，至少要包含坐标信息
+                        continue
+                        
+                    # 更健壮地提取原子名称 - 处理格式异常的PDB文件
+                    atom_name = ""
+                    if len(line) >= 16:
+                        try:
+                            atom_name = line[12:16].strip()
+                        except:
+                            # 如果提取失败，尝试其他方法
+                            parts = line.split()
+                            if len(parts) > 2:
+                                atom_name = parts[2]
+                    
+                    # 如果只提取骨架原子，则检查当前原子是否是骨架原子
+                    if backbone_only and atom_name not in backbone_atoms:
+                        continue
+                    
+                    # 提取坐标 - 使用更健壮的方法
+                    x, y, z = None, None, None
+                    
+                    # 方法1: 标准PDB格式
+                    try:
+                        if len(line) >= 54:
+                            x = float(line[30:38].strip())
+                            y = float(line[38:46].strip())
+                            z = float(line[46:54].strip())
+                    except ValueError as ve:
+                        print(f"标准方法解析坐标失败: {ve}")
+                        # 特殊处理"数字+空格+浮点数"的情况，如"49 286.8"
+                        try:
+                            x_str = line[30:38].strip()
+                            y_str = line[38:46].strip() 
+                            z_str = line[46:54].strip()
+                            
+                            # 如果值包含空格，提取最后一个部分
+                            if ' ' in x_str:
+                                x = float(x_str.split()[-1])
+                            else:
+                                x = float(x_str)
+                                
+                            if ' ' in y_str:
+                                y = float(y_str.split()[-1]) 
+                            else:
+                                y = float(y_str)
+                                
+                            if ' ' in z_str:
+                                z = float(z_str.split()[-1])
+                            else:
+                                z = float(z_str)
+                        except Exception as e:
+                            print(f"处理特殊格式坐标失败: {e}")
+                            pass
+                        
+                    # 方法2: 如果标准格式失败，尝试从行中提取任何浮点数
+                    if x is None or y is None or z is None:
+                        try:
+                            import re
+                            floats = re.findall(r'[-+]?\d*\.\d+', line)
+                            if len(floats) >= 3:
+                                x = float(floats[0])
+                                y = float(floats[1])
+                                z = float(floats[2])
+                        except Exception as e:
+                            print(f"提取浮点数失败: {e}")
+                            pass
+                            
+                    # 如果仍然无法提取坐标，跳过这一行
+                    if x is None or y is None or z is None:
+                        print(f"无法从行中提取坐标，跳过: {line.strip()}")
+                        continue
+                            
+                    # 提取元素类型
+                    element = ""
+                    if len(line) >= 78:
+                        element = line[76:78].strip()
+                    
+                    if not element:
+                        # 如果元素字段为空，尝试从原子名称推断
+                        if atom_name:
+                            # 取第一个非数字字符
+                            element = ''.join([c for c in atom_name if not c.isdigit()]).strip()[0:1]
+                        else:
+                            # 默认为碳原子
+                            element = "C"
+                    
+                    atom_list.append([x, y, z])
+                    atom_type_list.append(element)
+                except Exception as e:
+                    print(f"解析原子行时出错，跳过: {line.strip()}")
+                    print(f"错误详情: {e}")
+                    continue
+    except Exception as e:
+        print(f"读取或解析PDB文件时出错: {e}")
+        # 尝试从文件名推断是否为PDB文件
+        if not pdb_file.lower().endswith('.pdb'):
+            print(f"警告: 文件可能不是有效的PDB文件: {pdb_file}")
+        raise ValueError(f"无法解析PDB文件: {e}")
+        
+    if len(atom_list) == 0:
+        # 如果没有提取到任何原子，尝试一种非常简单的方法 - 任何包含三个连续浮点数的行
+        try:
+            print("尝试最终的解析方法 - 搜索任何包含三个浮点数的行")
+            with open(pdb_file, 'r', errors='ignore') as f:
+                content = f.read()
+                
+            import re
+            # 查找所有浮点数
+            floats = re.findall(r'[-+]?\d*\.\d+', content)
+            
+            # 每三个浮点数作为一个原子的坐标
+            for i in range(0, len(floats) - 2, 3):
+                try:
+                    x = float(floats[i])
+                    y = float(floats[i+1])
+                    z = float(floats[i+2])
+                    atom_list.append([x, y, z])
+                    atom_type_list.append("C")  # 默认为碳原子
+                except Exception as e:
+                    print(f"处理浮点数三元组失败: {e}")
+                    continue
+        except Exception as e:
+            print(f"最终解析方法也失败: {e}")
+            
+    if len(atom_list) == 0:
+        # 如果仍然没有提取到任何原子，则抛出错误
+        raise ValueError(f"未能从PDB文件中提取任何原子: {pdb_file}")
+        
+    print(f"手动解析PDB文件提取了{len(atom_list)}个原子")
+    return np.array(atom_list), atom_type_list
 
-    if backbone_only:
-        for model in structure:
-            for chain in model:
-                for residue in chain:
-                    if "CA" in residue:
-                        atom_list.append(residue["CA"].get_coord())
-                        atom_type_list.append(residue["CA"].element)
-                        if "C" in residue:
-                            atom_list.append(residue["C"].get_coord())
-                            atom_type_list.append(residue["C"].element)
-                        if "N" in residue:
-                            atom_list.append(residue["N"].get_coord())
-                            atom_type_list.append(residue["N"].element)
-                        # atom_list.append(residue["O"].get_coord())
-                        # atom_type_list.append(residue["O"].element)
-    else:
-        for atom in structure.get_atoms():
-            atom_list.append(atom.get_coord())
-            atom_type_list.append(atom.element)
+
+def parse_cif_file_manually(cif_file, backbone_only=False):
+    """手动解析CIF文件，提取原子坐标和类型"""
+    print(f"尝试手动解析CIF文件: {cif_file}")
+    backbone_atoms = ["CA", "C", "N"]  # 只保留蛋白质主链原子
+    # 移除RNA/DNA主链原子: P, O5', C5', C4', O4', C3', O3', C2', O2', C1'
+    atom_list = []
+    atom_type_list = List()
+    
+    try:
+        with open(cif_file, 'r', errors='ignore') as f:
+            cif_content = f.read()
+            
+        # 查找atom_site数据块
+        import re
+        atom_site_match = re.search(r'_atom_site\..*?(?=_|\Z)', cif_content, re.DOTALL)
+        if not atom_site_match:
+            raise ValueError("CIF文件中未找到atom_site数据块")
+            
+        atom_site_block = atom_site_match.group(0)
+        
+        # 提取列标题
+        headers = re.findall(r'_atom_site\.(\S+)', atom_site_block)
+        
+        # 定位关键列
+        col_indices = {}
+        for key in ['group_PDB', 'label_atom_id', 'Cartn_x', 'Cartn_y', 'Cartn_z', 'type_symbol']:
+            try:
+                col_indices[key] = headers.index(key)
+            except ValueError:
+                col_indices[key] = -1
+                
+        # 确认必要的列都存在
+        required_cols = ['Cartn_x', 'Cartn_y', 'Cartn_z']
+        if any(col_indices[col] == -1 for col in required_cols):
+            raise ValueError("CIF文件中缺少必要的坐标列")
+            
+        # 解析所有行
+        data_lines = re.findall(r'\n(\S+(?:\s+\S+)*)', atom_site_block)
+        for line in data_lines:
+            try:
+                parts = line.split()
+                if len(parts) <= max(col_indices.values()):
+                    continue
+                    
+                # 如果这是ATOM行
+                if col_indices['group_PDB'] != -1 and parts[col_indices['group_PDB']] != 'ATOM':
+                    continue
+                    
+                # 如果只提取骨架原子，检查原子名称
+                if backbone_only:
+                    if col_indices['label_atom_id'] == -1:
+                        continue
+                    atom_name = parts[col_indices['label_atom_id']].strip('"\'')
+                    if atom_name not in backbone_atoms:
+                        continue
+                
+                # 提取并处理坐标（处理可能存在的格式问题）
+                try:
+                    # 处理"数字+空格+浮点数"的格式问题
+                    def parse_float_value(value_str):
+                        # 如果值包含空格，可能是"数字+空格+浮点数"格式
+                        if ' ' in value_str:
+                            # 分割所有部分，取最后一个部分作为浮点数
+                            parts = value_str.split()
+                            return float(parts[-1])
+                        else:
+                            return float(value_str)
+                    
+                    # 提取X坐标
+                    x_value = parts[col_indices['Cartn_x']]
+                    x = parse_float_value(x_value)
+                    
+                    # 提取Y坐标
+                    y_value = parts[col_indices['Cartn_y']]
+                    y = parse_float_value(y_value)
+                    
+                    # 提取Z坐标
+                    z_value = parts[col_indices['Cartn_z']]
+                    z = parse_float_value(z_value)
+                    
+                except ValueError as ve:
+                    print(f"无法解析坐标值: {ve}")
+                    # 尝试替代方法：针对CIF中特殊格式进行处理
+                    try:
+                        # 尝试解析整行以确定坐标位置
+                        # 在CIF文件中，通常坐标是连续的三个数值
+                        found_coords = False
+                        for i in range(len(parts) - 2):
+                            try:
+                                # 尝试连续的三个值作为坐标
+                                x = float(parts[i].split()[-1] if ' ' in parts[i] else parts[i])
+                                y = float(parts[i+1].split()[-1] if ' ' in parts[i+1] else parts[i+1])
+                                z = float(parts[i+2].split()[-1] if ' ' in parts[i+2] else parts[i+2])
+                                found_coords = True
+                                break
+                            except ValueError:
+                                continue
+                        
+                        if not found_coords:
+                            raise ValueError(f"无法在行中找到有效的坐标三元组: {line}")
+                    except Exception as e2:
+                        print(f"替代解析方法也失败: {e2}")
+                        continue
+                
+                # 提取元素类型
+                if col_indices['type_symbol'] != -1:
+                    element = parts[col_indices['type_symbol']].strip('"\'')
+                elif col_indices['label_atom_id'] != -1:
+                    # 如果没有元素列，尝试从原子名称推断
+                    atom_name = parts[col_indices['label_atom_id']].strip('"\'')
+                    element = ''.join([c for c in atom_name if not c.isdigit()]).strip()[0:1]
+                else:
+                    # 默认为碳原子
+                    element = "C"
+                    
+                atom_list.append([x, y, z])
+                atom_type_list.append(element)
+                
+            except Exception as e:
+                print(f"解析CIF数据行时出错，跳过: {e}")
+                continue
+                
+    except Exception as e:
+        print(f"读取CIF文件时出错: {e}")
+        raise
+        
+    if len(atom_list) == 0:
+        raise ValueError("未能从CIF文件中提取任何原子")
+        
+    print(f"手动解析CIF文件提取了{len(atom_list)}个原子")
     return np.array(atom_list), atom_type_list
 
 
@@ -402,9 +784,17 @@ def pdb2vol(
     # sigma_coeff = 1/(2*sqrt(2)) =  0.356 makes the Gaussian width at 1/e maximum height equal the resolution
     # sigma_coeff = 1/(2*sqrt(2*log(2))) = 0.4247 makes the Gaussian width at half maximum height equal the resolution
 
-    if input_pdb.split(".")[-1] not in ["pdb", "cif"]:
-        raise ValueError("Input file must be a pdb or cif file")
-    atoms, types = get_atom_list(input_pdb, backbone_only=backbone_only)
+    # 检查文件扩展名，改为大小写不敏感
+    file_ext = os.path.splitext(input_pdb)[1].lower()
+    if file_ext not in [".pdb", ".cif"]:
+        raise ValueError(f"输入文件必须是PDB或CIF格式。当前文件扩展名: {file_ext}")
+    
+    print(f"处理输入文件: {input_pdb}，文件类型: {'CIF' if file_ext == '.cif' else 'PDB'}")
+    
+    try:
+        atoms, types = get_atom_list(input_pdb, backbone_only=backbone_only)
+    except Exception as e:
+        raise ValueError(f"无法解析{file_ext}文件: {e}")
 
     if len(atoms) == 0:
         raise ValueError("No atoms found in input file")

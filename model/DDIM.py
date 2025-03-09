@@ -64,7 +64,7 @@ class DDIM(Base_DDIM):
         self.log_dict['iou'] = iou_val.item()
         
         # 记录问题数据的详细信息
-        if trouble_log and log_path is not None and (l_pix.item() > 0.9999 or iou_val.item() < 0.0001):
+        if trouble_log and log_path is not None and (l_pix.item() > 0.99 or iou_val.item() < 0.01):
             self._log_trouble_data(log_path, batch_idx, l_pix.item(), x_recon, x_target, iou_val.item())
             
         return self.log_dict

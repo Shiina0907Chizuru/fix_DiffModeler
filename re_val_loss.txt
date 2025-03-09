@@ -1,0 +1,4 @@
+Epoch 0: Average Loss = 0.447556 (Min: 0.275774, Max: 0.985011, Std: 0.088296, from 9622 samples, excluding values > 0.99)
+Epoch 1: Average Loss = 0.444458 (Min: 0.276725, Max: 0.989065, Std: 0.087264, from 9620 samples, excluding values > 0.99)
+Epoch 2: Average Loss = 0.444237 (Min: 0.278266, Max: 0.989597, Std: 0.087995, from 9630 samples, excluding values > 0.99)
+Epoch 3: Average Loss = 0.441497 (Min: 0.274439, Max: 0.985502, Std: 0.083144, from 9621 samples, excluding values > 0.99)

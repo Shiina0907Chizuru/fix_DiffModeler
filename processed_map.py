@@ -79,6 +79,8 @@
 # 集群使用版本
 import os
 import argparse
+import numpy as np
+import shutil
 from data_processing.Unify_Map import Unify_Map
 from data_processing.Resize_Map import Resize_Map
 from ops.map_utils import increase_map_density
@@ -137,39 +139,71 @@ def process_protein(protein_name, contour_level):
     返回:
     - None
     """
-    # 根据蛋白质名称自动设置路径
-    # 旧代码注释掉
-    # base_path = "/share/home/xiaogenz/users/jiangzhaox/DiffModeler_data"
-    # input_map_path = os.path.join(base_path,"mrc",f"{protein_name}_map.mrc")
-    # save_path = os.path.join(base_path,"43_proteindataset" , protein_name)
+    print(f"Processing protein: {protein_name}, Contour level: {contour_level}")
     
     # 新的路径设置
-    base_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset"
-    input_folder = os.path.join(base_path, "trainpdb_emdb_data", f"PDB-{protein_name.upper()}-EMD-*")
+    base_path = r"/defaultShare/zcan-library/Diffmodeler_data/20250306dataset"
+    input_folder = os.path.join(base_path, "origin", f"PDB-{protein_name.lower()}-EMD-*")
     
     # 使用glob查找匹配的文件夹
     import glob
     matching_folders = glob.glob(input_folder)
+    
     if not matching_folders:
         print(f"No matching folder found for protein: {protein_name}")
-        return
+        # 尝试更宽松的匹配
+        try:
+            all_folders = os.listdir(os.path.join(base_path, "origin"))
+            potential_matches = []
+            for folder in all_folders:
+                if protein_name.lower() in folder.lower():
+                    potential_matches.append(os.path.join(base_path, "origin", folder))
+            
+            if potential_matches:
+                print(f"Found possible matches using flexible search: {potential_matches}")
+                matching_folders = potential_matches
+            else:
+                print(f"No potential matches found even with flexible search.")
+                print(f"Sample of available folders: {all_folders[:5] if len(all_folders) > 5 else all_folders}")
+                return
+        except Exception as e:
+            print(f"Error while trying flexible match: {str(e)}")
+            return
         
     input_folder = matching_folders[0]  # 使用第一个匹配的文件夹
+    print(f"Using folder: {input_folder}")
     
     # 在文件夹中查找.map文件
     map_files = glob.glob(os.path.join(input_folder, "*.map"))
     if not map_files:
-        print(f"No .map file found in folder: {input_folder}")
-        return
-        
-    input_map_path = map_files[0]  # 使用第一个找到的.map文件
+        # 如果没有找到.map文件，尝试找.mrc文件
+        map_files = glob.glob(os.path.join(input_folder, "*.mrc"))
+        if not map_files:
+            print(f"No .map or .mrc file found in folder: {input_folder}")
+            # 显示文件夹内容
+            try:
+                files = os.listdir(input_folder)
+                print(f"Files in folder: {files}")
+            except Exception as e:
+                print(f"Error listing directory contents: {str(e)}")
+            return
+    
+    input_map_path = map_files[0]  # 使用第一个找到的.map或.mrc文件
+    print(f"Using input map file: {input_map_path}")
+    
     save_path = os.path.join(input_folder, "processed")
     map_name = protein_name
 
-    # 调用预处理函数
-    processed_save_path, processed_map_path = preprocess_map(input_map_path, save_path, protein_name, contour_level)
-    print(f"Processed files are saved at: {processed_save_path}")
-    print(f"New processed map path: {processed_map_path}")
+    # 确保保存路径存在
+    os.makedirs(save_path, exist_ok=True)
+
+    try:
+        # 调用预处理函数
+        processed_save_path, processed_map_path = preprocess_map(input_map_path, save_path, protein_name, contour_level)
+        print(f"Processed files are saved at: {processed_save_path}")
+        print(f"New processed map path: {processed_map_path}")
+    except Exception as e:
+        print(f"Error processing protein {protein_name}: {str(e)}")
 
 
 def process_from_file(input_file):
@@ -189,41 +223,59 @@ def process_from_file(input_file):
         print(f"Input file {input_file} not found!")
         return
 
+    print(f"Processing proteins from file: {input_file}")
+    
+    # 跟踪成功和失败的处理
+    success_count = 0
+    failure_count = 0
+    proteins_processed = []
+    proteins_failed = []
+
     with open(input_file, 'r') as file:
-        # 旧代码注释掉
-        # for line in file:
-        #     line = line.strip()
-        #     if not line or ':' not in line:
-        #         continue  # 跳过空行或无效行
-        #     try:
-        #         protein_name, contour_level = line.split(':')
+        lines = file.readlines()
+        total_lines = len(lines)
         
-        # 新的解析逻辑
-        for line in file:
+        for idx, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue  # 跳过空行
-
-            try:
-                # 新格式: "protein_id: contour_level值"
-                parts = line.split(':')
-                if len(parts) != 2:
-                    print(f"Invalid line format: {line}")
-                    continue
-                    
-                protein_name = parts[0].strip()
-                contour_level = float(parts[1].strip().split()[0])  # 取第一个数值
                 
-                # 如果protein_name中包含PDB-前缀，去掉它
-                if protein_name.startswith('PDB-'):
-                    protein_name = protein_name[4:]
-                    
-                print(f"Processing protein: {protein_name}, Contour level: {contour_level}")
+            try:
+                # 尝试解析行中的蛋白质名称和轮廓阈值
+                if ':' in line:
+                    protein_name, contour_level = line.split(':')
+                    protein_name = protein_name.strip()
+                    contour_level = float(contour_level.strip())
+                else:
+                    # 如果没有冒号，假设只有蛋白质名称，使用默认轮廓阈值
+                    protein_name = line
+                    contour_level = 0.0  # 默认轮廓阈值
+                
+                print(f"\nProcessing {idx+1}/{total_lines}: {protein_name} (contour: {contour_level})")
                 process_protein(protein_name, contour_level)
-            except (ValueError, IndexError) as e:
-                print(f"Error processing line: {line}")
-                print(f"Error details: {str(e)}")
-                continue
+                success_count += 1
+                proteins_processed.append(protein_name)
+            except Exception as e:
+                print(f"Error processing line '{line}': {str(e)}")
+                failure_count += 1
+                proteins_failed.append(protein_name if 'protein_name' in locals() else line)
+                continue  # 继续处理下一行
+    
+    # 打印处理统计
+    print("\n=== Processing Summary ===")
+    print(f"Total proteins: {total_lines}")
+    print(f"Successfully processed: {success_count}")
+    print(f"Failed: {failure_count}")
+    
+    if proteins_processed:
+        print("\nProcessed proteins:")
+        for protein in proteins_processed:
+            print(f"  - {protein}")
+    
+    if proteins_failed:
+        print("\nFailed proteins:")
+        for protein in proteins_failed:
+            print(f"  - {protein}")
 
 
 if __name__ == "__main__":
@@ -235,7 +287,7 @@ if __name__ == "__main__":
     
     # 新的参数设置
     parser.add_argument("--info_txt", type=str, 
-                      default=r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\contour_levels1.txt",
+                      default=r"/defaultShare/zcan-library/Diffmodeler_data/20250306dataset/20250306contour_level.txt",
                       help="Path to the input .txt file containing protein names and contour levels.")
 
     # 解析参数

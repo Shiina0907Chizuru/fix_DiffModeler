@@ -82,9 +82,11 @@ def process_dataset(source_root, target_root):
 
 if __name__ == "__main__":
     # 源数据集路径
-    source_root = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\trainpdb_emdb_data"
+    # source_root = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\trainpdb_emdb_data"
+    source_root = r"/defaultShare/zcan-library/Diffmodeler_data/20250306dataset/origin"
     # 目标数据集路径
-    target_root = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\dataset"
+    # target_root = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\dataset"
+    target_root = r"/defaultShare/zcan-library/Diffmodeler_data/20250308processed_dataset"
     
     # 处理数据集
     process_dataset(source_root, target_root)
