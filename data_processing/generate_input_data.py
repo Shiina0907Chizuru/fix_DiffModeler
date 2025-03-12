@@ -127,7 +127,7 @@ def generate_infer_data(input_map_path,save_input_dir,contour,params):
         percentile_98 = find_top_density(map_data,0.98)
 
         print("map hist log percentage 98: ",percentile_98)
-        map_data[map_data > percentile_98] = percentile_98
+        # map_data[map_data > percentile_98] = percentile_98    //有问题的操作，例如7r9h，非背景数据少于2%，导致数据丢失
         min_value = np.min(map_data)
         max_value = np.max(map_data)
         map_data = (map_data-min_value)/(max_value-min_value)

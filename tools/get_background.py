@@ -5,17 +5,18 @@ import argparse
 from tqdm import tqdm
 import glob
 
-def find_background_value(data, bins=10000):
+def find_background_value(data, bins=10000, use_next_bin=False):
     """
-    直接在原始数据上找到最频繁的值
+    直接在原始数据上找到最频繁的值，并可选返回比最频繁值高一个分箱的值
     
     Args:
         data: 原始数据数组
         bins: 直方图的分箱数量
+        use_next_bin: 是否使用比最频繁值高一个分箱的值
     
     Returns:
-        tuple: (most_frequent_value, percentage)
-            - most_frequent_value: 最频繁出现的值
+        tuple: (selected_value, percentage)
+            - selected_value: 选定的值(最频繁的值或更高一个分箱的值)
             - percentage: 该值占总体的百分比
     """
     # 获取数据的范围
@@ -33,15 +34,24 @@ def find_background_value(data, bins=10000):
     # 找到频率最高的分箱
     max_bin_index = np.argmax(hist)
     
-    # 计算分箱中心值（最频繁值）
-    bin_center = (bin_edges[max_bin_index] + bin_edges[max_bin_index + 1]) / 2
+    # 判断是使用最频繁值还是更高一个分箱的值
+    selected_bin_index = max_bin_index
+    if use_next_bin and max_bin_index < bins - 1:
+        selected_bin_index = max_bin_index + 1
+        print(f"  使用比最频繁值高一个分箱的值")
+    
+    # 计算选定分箱的中心值
+    selected_value = (bin_edges[selected_bin_index] + bin_edges[selected_bin_index + 1]) / 2
     
     # 计算该值的占比百分比
-    percentage = (hist[max_bin_index] / np.sum(hist)) * 100
+    max_percentage = (hist[max_bin_index] / np.sum(hist)) * 100
+    selected_percentage = (hist[selected_bin_index] / np.sum(hist)) * 100
     
     # 打印直方图诊断信息
-    print(f"  Histogram diagnostics - Total bins: {bins}, Max bin: {max_bin_index}")
-    print(f"  Bin range: [{bin_edges[max_bin_index]:.8f}, {bin_edges[max_bin_index+1]:.8f}]")
+    print(f"  Histogram diagnostics - Total bins: {bins}, Max bin: {max_bin_index}, Selected bin: {selected_bin_index}")
+    print(f"  Bin edges: [{bin_edges[max_bin_index]:.8f}, {bin_edges[max_bin_index+1]:.8f}]")
+    if selected_bin_index != max_bin_index:
+        print(f"  Selected bin edges: [{bin_edges[selected_bin_index]:.8f}, {bin_edges[selected_bin_index+1]:.8f}]")
     print(f"  Top 3 most frequent bins:")
     
     # 获取前3个最频繁的分箱
@@ -51,7 +61,7 @@ def find_background_value(data, bins=10000):
         bin_pct = (hist[idx] / np.sum(hist)) * 100
         print(f"    #{i+1}: Value = {bin_val:.8f}, Percentage = {bin_pct:.2f}%")
     
-    return bin_center, percentage
+    return selected_value, selected_percentage
 
 def normalize_value(value, min_val, max_val):
     """
@@ -90,12 +100,13 @@ def find_top_density(data, percentile=0.98):
     # 返回对应的值
     return bin_edges[percentile_idx]
 
-def process_segment_mrc_file(mrc_path):
+def process_segment_mrc_file(mrc_path, use_next_bin=False):
     """
     处理输入(segment)MRC文件找到背景值，使用与generate_infer_data一致的归一化方式
     
     Args:
         mrc_path: MRC文件路径
+        use_next_bin: 是否使用比最频繁值高一个分箱的值
     
     Returns:
         tuple: (raw_background, normalized_background, percentage) 或 (None, None, None)
@@ -125,7 +136,7 @@ def process_segment_mrc_file(mrc_path):
             print(f"  原始数据统计: 最小值={min_orig:.8f}, 最大值={max_orig:.8f}")
             
             # 找到最频繁的背景值 (在原始数据上)
-            background, percentage = find_background_value(data)
+            background, percentage = find_background_value(data, use_next_bin=use_next_bin)
             
             # 使用与generate_infer_data一致的归一化
             # 找到98百分位值并修剪
@@ -156,12 +167,13 @@ def process_segment_mrc_file(mrc_path):
         print(f"Error processing {mrc_path}: {str(e)}")
         return None, None, None
 
-def process_backbone_mrc_file(mrc_path):
+def process_backbone_mrc_file(mrc_path, use_next_bin=False):
     """
     处理输出(backbone)MRC文件找到背景值
     
     Args:
         mrc_path: MRC文件路径
+        use_next_bin: 是否使用比最频繁值高一个分箱的值
     
     Returns:
         tuple: (raw_background, normalized_background, percentage) 或 (None, None, None)
@@ -186,7 +198,7 @@ def process_backbone_mrc_file(mrc_path):
                 print(f"  Sample unique values: {unique_vals[:5]}...{unique_vals[-5:]}")
             
             # 找到最频繁的背景值
-            background, percentage = find_background_value(data)
+            background, percentage = find_background_value(data, use_next_bin=use_next_bin)
             
             # 获取数据范围用于归一化
             min_val = np.min(data)
@@ -213,6 +225,8 @@ def main():
                         help='Output file to write background values')
     parser.add_argument('--bins', type=int, default=10000,
                         help='Number of bins to use for the histogram')
+    parser.add_argument('--use_next_bin', action='store_true',
+                        help='使用比最频繁值高一个分箱的值作为背景值')
     
     args = parser.parse_args()
     
@@ -256,28 +270,28 @@ def main():
             continue
         
         # 处理输入(segment)MRC文件
-        input_raw_bg, input_norm_bg, input_percentage = process_segment_mrc_file(segment_path)
+        raw_input_bg, norm_input_bg, input_pct = process_segment_mrc_file(segment_path, args.use_next_bin)
         
         # 处理输出(backbone)MRC文件
-        output_raw_bg, output_norm_bg, output_percentage = process_backbone_mrc_file(backbone_path)
+        raw_output_bg, norm_output_bg, output_pct = process_backbone_mrc_file(backbone_path, args.use_next_bin)
         
-        if input_raw_bg is not None and output_raw_bg is not None:
+        if raw_input_bg is not None and raw_output_bg is not None:
             background_values[protein_id] = (
-                input_raw_bg, input_norm_bg, input_percentage,
-                output_raw_bg, output_norm_bg, output_percentage
+                raw_input_bg, norm_input_bg, input_pct,
+                raw_output_bg, norm_output_bg, output_pct
             )
             print(f"  RESULT: Protein {protein_id}:")
-            print(f"    Input - Raw BG: {input_raw_bg:.8f}, Normalized: {input_norm_bg:.8f}, Percentage: {input_percentage:.2f}%")
-            print(f"    Output - Raw BG: {output_raw_bg:.8f}, Normalized: {output_norm_bg:.8f}, Percentage: {output_percentage:.2f}%")
+            print(f"    Input - Raw BG: {raw_input_bg:.8f}, Normalized: {norm_input_bg:.8f}, Percentage: {input_pct:.2f}%")
+            print(f"    Output - Raw BG: {raw_output_bg:.8f}, Normalized: {norm_output_bg:.8f}, Percentage: {output_pct:.2f}%")
     
     # 将背景值写入文件
     try:
         with open(args.output_file, 'w') as f:
             f.write("# protein_id inputbackground inputpercent outputbackground outputpercent\n")
             for protein_id, values in background_values.items():
-                input_raw_bg, input_norm_bg, input_percentage, output_raw_bg, output_norm_bg, output_percentage = values
-                f.write(f"{protein_id} inputbackground: {input_norm_bg:.8f} inputpercent: {input_percentage:.2f} "
-                        f"outputbackground: {output_norm_bg:.8f} outputpercent: {output_percentage:.2f}\n")
+                raw_input_bg, norm_input_bg, input_pct, raw_output_bg, norm_output_bg, output_pct = values
+                f.write(f"{protein_id} inputbackground: {norm_input_bg:.8f} inputpercent: {input_pct:.2f} "
+                        f"outputbackground: {norm_output_bg:.8f} outputpercent: {output_pct:.2f}\n")
         print(f"Background values saved to {os.path.abspath(args.output_file)}")
     except Exception as e:
         print(f"Error writing output file: {str(e)}")

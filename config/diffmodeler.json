@@ -7,7 +7,7 @@
     "db_exp_path": "data/rcsb.db",
     "db_path": "data/rcsb_afdb.db",//for server usage, remove dependency on EBI's API
     "model": {
-      "path": "best_model/diffusion_best.pth.tar",
+      "path": "C:/Users/Z/Desktop/model_best.pth.tar",
       "unet": {
             "network_type": "unet3d", 
             "in_channel": 3,
@@ -44,7 +44,7 @@
                 "infer_clip":1
             }
         },
-      "batch_size": 4,
+      "batch_size": 4,//unet3d 4
       "num_workers": 4
     },
     "LDP": {
