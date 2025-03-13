@@ -7,7 +7,7 @@
     "db_exp_path": "data/rcsb.db",
     "db_path": "data/rcsb_afdb.db",//for server usage, remove dependency on EBI's API
     "model": {
-      "path": "C:/Users/Z/Desktop/model_best.pth.tar",
+      "path": "E:\\ZJUT\\Research\\MrZhouDeepLearning\\DiffReaserch\\DiffModeler_data\\best_model\\diffusion_best.pth.tar",
       "unet": {
             "network_type": "unet3d", 
             "in_channel": 3,

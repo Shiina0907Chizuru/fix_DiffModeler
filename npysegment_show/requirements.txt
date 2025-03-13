@@ -1,0 +1,5 @@
+numpy
+PyQt5
+vtk
+mrcfile
+matplotlib
