@@ -2,10 +2,10 @@ import os
 
 # 指定目录路径
 # directory_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\trainpdb_emdb_data"
-directory_path = r"/defaultShare/zcan-library/Diffmodeler_data/20250306dataset/origin"
+directory_path = r"/defaultShare/FinialPDB"
 
 # 输出文件路径
-output_file = "20250306.txt"
+output_file = "20250315.txt"
 
 # 获取所有文件夹名称并提取PDB ID
 pdb_ids = []

@@ -276,14 +276,14 @@ except Exception as e:
 print("WebDriver initialized.")
 
 # txt 文件路径
-pdb_list_file = "c:/Users/Z/Desktop/20250306.txt"
+pdb_list_file = "c:/Users/Z/Desktop/20250315.txt"
 
 # 保存结果的 txt 文件路径
-output_file_path = "c:/Users/Z/Desktop/20250306contour_level&resolution.txt"
+output_file_path = "c:/Users/Z/Desktop/20250315contour_level&resolution.txt"
 # 保存 JSON 格式结果的文件路径
-json_output_file_path = "c:/Users/Z/Desktop/20250306contour_level&resolution.json"
+json_output_file_path = "c:/Users/Z/Desktop/20250315contour_level&resolution.json"
 # 临时文件路径，用于存储处理中的结果
-temp_output_file_path = "c:/Users/Z/Desktop/20250306contour_level&resolution_temp.txt"
+temp_output_file_path = "c:/Users/Z/Desktop/20250315contour_level&resolution_temp.txt"
 # 保存没有找到信息的蛋白质
 missing_info_file_path = "c:/Users/Z/Desktop/20250306missing_info.txt"
 

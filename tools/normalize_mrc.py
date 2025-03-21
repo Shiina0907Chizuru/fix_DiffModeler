@@ -177,6 +177,25 @@ def process_mrc_file(input_path, output_path=None, method='zscore', lower_percen
                                 new_mrc.header.mapr = mrc.header.mapr
                             if hasattr(mrc.header, 'maps'):
                                 new_mrc.header.maps = mrc.header.maps
+                            
+                            # 添加复制origin信息
+                            if hasattr(mrc.header, 'origin'):
+                                new_mrc.header.origin = mrc.header.origin
+                            if hasattr(mrc.header, 'nxstart'):
+                                new_mrc.header.nxstart = mrc.header.nxstart
+                            if hasattr(mrc.header, 'nystart'):
+                                new_mrc.header.nystart = mrc.header.nystart
+                            if hasattr(mrc.header, 'nzstart'):
+                                new_mrc.header.nzstart = mrc.header.nzstart
+                            
+                            # 打印origin信息以便验证
+                            print("复制原始origin信息:")
+                            if hasattr(mrc.header, 'origin'):
+                                print(f"  原始origin: {mrc.header.origin}")
+                            if hasattr(mrc.header, 'nxstart'):
+                                print(f"  原始nxstart: {mrc.header.nxstart}")
+                                print(f"  原始nystart: {mrc.header.nystart}")
+                                print(f"  原始nzstart: {mrc.header.nzstart}")
                         except Exception as e:
                             print(f"  注意: 无法复制某些header属性: {str(e)}")
                     

@@ -1,84 +1,10 @@
-# import os
-# from data_processing.Unify_Map import Unify_Map
-# from data_processing.Resize_Map import Resize_Map
-# from ops.map_utils import increase_map_density
-# from modeling.map_utils import segment_map
-#
-# def preprocess_map(input_map_path, save_path, map_name, contour_level=0):
-#     """
-#     对输入的 .map 文件进行一系列预处理，包括统一格式、调整大小和密度增加等操作。
-#
-#     参数:
-#     - input_map_path (str): 输入 .map 文件的路径。
-#     - save_path (str): 预处理后文件的保存目录。
-#     - map_name (str): 文件名的基本名称，用于生成处理后的文件名。
-#     - contour_level (float): 轮廓阈值，用于调整密度。
-#
-#     返回:
-#     - tuple: 预处理后的保存路径和新的 .map 文件路径。
-#     """
-#     save_path = os.path.abspath(save_path)
-#
-#     # **新增：确保保存目录存在**
-#     if not os.path.exists(save_path):
-#         os.makedirs(save_path)  # 自动创建目录
-#
-#     # 统一 .map 文件格式
-#     cur_map_path = Unify_Map(input_map_path, os.path.join(save_path, map_name + "_unified.mrc"))
-#
-#     # 调整 .map 文件大小
-#     cur_map_path = Resize_Map(cur_map_path, os.path.join(save_path, map_name + ".mrc"))
-#
-#     # 如果 contour_level 大于 0，则调整密度
-#     if contour_level > 0:
-#         cur_map_path = increase_map_density(
-#             cur_map_path,
-#             os.path.join(save_path, map_name + "_increase.mrc"),
-#             contour_level
-#         )
-#         contour_level = 0  # 将 contour_level 设为 0，用于下一步的处理
-#
-#     # 生成分割后的 .map 文件
-#     new_map_path = os.path.join(save_path, map_name + "_segment.mrc")
-#     segment_map(cur_map_path, new_map_path, contour=contour_level)
-#
-#     return save_path, new_map_path
-#
-#
-#
-#
-# # 设置蛋白质名称
-# protein_name = "8gpr"  # 只需修改此处的蛋白质名称即可，例如 "3j22" 或 "8h3r"
-#
-# # # 根据蛋白质名称自动设置路径和轮廓阈值
-# # input_map_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\DATA\{protein_name}\emd.map"
-# # save_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\DATA\{protein_name}\processed"
-#
-# input_map_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\mrc\{protein_name}_map.mrc"
-# save_path = rf"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\43_proteindataset\{protein_name}\processed"
-# "E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\43_proteindataset"
-# map_name = protein_name
-#
-# # 根据蛋白质名称自动设置 contour_level
-# contour_levels = {
-#     "3j9p": 8.0,
-#     "3j22": 1.0,
-#     "8h3r": 0.001,
-#     "8gpr": 0.52,
-# }
-# contour_level = contour_levels.get(protein_name, 1.0)  # 默认值为 1.0，如果未找到匹配的名称
-#
-# # 调用预处理函数
-# processed_save_path, processed_map_path = preprocess_map(input_map_path, save_path, map_name, contour_level)
-#
-# print(f"Processed files are saved at: {processed_save_path}")
-# print(f"New processed map path: {processed_map_path}")
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-
-
-# 集群使用版本
 import os
+import sys
 import argparse
+import glob
 import numpy as np
 import shutil
 from data_processing.Unify_Map import Unify_Map
@@ -112,14 +38,14 @@ def preprocess_map(input_map_path, save_path, map_name, contour_level=0):
     # 调整 .map 文件大小
     cur_map_path = Resize_Map(cur_map_path, os.path.join(save_path, map_name + ".mrc"))
 
-    # 如果 contour_level 大于 0，则调整密度
-    if contour_level > 0:
-        cur_map_path = increase_map_density(
-            cur_map_path,
-            os.path.join(save_path, map_name + "_increase.mrc"),
-            contour_level
-        )
-        contour_level = 0  # 将 contour_level 设为 0，用于下一步的处理
+    # # 如果 contour_level 大于 0，则调整密度
+    # if contour_level > 0:
+    #     cur_map_path = increase_map_density(
+    #         cur_map_path,
+    #         os.path.join(save_path, map_name + "_increase.mrc"),
+    #         contour_level
+    #     )
+    #     contour_level = 0  # 将 contour_level 设为 0，用于下一步的处理
 
     # 生成分割后的 .map 文件
     new_map_path = os.path.join(save_path, map_name + "_segment.mrc")
@@ -128,13 +54,14 @@ def preprocess_map(input_map_path, save_path, map_name, contour_level=0):
     return save_path, new_map_path
 
 
-def process_protein(protein_name, contour_level):
+def process_protein(protein_name, contour_level, skip_existing=True):
     """
     通过蛋白质名称选择并预处理对应的 .map 文件。
 
     参数:
     - protein_name (str): 蛋白质的名称，例如 "3j9p"。
     - contour_level (float): 蛋白质的轮廓阈值。
+    - skip_existing (bool): 如果为True，当目标processed文件夹已存在时跳过处理。
 
     返回:
     - None
@@ -142,22 +69,22 @@ def process_protein(protein_name, contour_level):
     print(f"Processing protein: {protein_name}, Contour level: {contour_level}")
     
     # 新的路径设置
-    base_path = r"/defaultShare/zcan-library/Diffmodeler_data/20250306dataset"
-    input_folder = os.path.join(base_path, "origin", f"PDB-{protein_name.lower()}-EMD-*")
+    base_path = r"/zhaoxuanj/FinialPDB"
+    # input_folder = os.path.join(base_path, "origin", f"PDB-{protein_name.lower()}-EMD-*")
+    input_folder = os.path.join(base_path, f"PDB-{protein_name.lower()}-EMD-*")
     
     # 使用glob查找匹配的文件夹
-    import glob
     matching_folders = glob.glob(input_folder)
     
     if not matching_folders:
         print(f"No matching folder found for protein: {protein_name}")
         # 尝试更宽松的匹配
         try:
-            all_folders = os.listdir(os.path.join(base_path, "origin"))
+            all_folders = os.listdir(os.path.join(base_path))
             potential_matches = []
             for folder in all_folders:
                 if protein_name.lower() in folder.lower():
-                    potential_matches.append(os.path.join(base_path, "origin", folder))
+                    potential_matches.append(os.path.join(base_path, folder))
             
             if potential_matches:
                 print(f"Found possible matches using flexible search: {potential_matches}")
@@ -192,6 +119,12 @@ def process_protein(protein_name, contour_level):
     print(f"Using input map file: {input_map_path}")
     
     save_path = os.path.join(input_folder, "processed")
+    
+    # 检查processed文件夹是否已存在，如果存在且skip_existing为True，则跳过处理
+    if skip_existing and os.path.exists(save_path):
+        print(f"Processed folder already exists for {protein_name}, skipping...")
+        return
+    
     map_name = protein_name
 
     # 确保保存路径存在
@@ -206,7 +139,7 @@ def process_protein(protein_name, contour_level):
         print(f"Error processing protein {protein_name}: {str(e)}")
 
 
-def process_from_file(input_file):
+def process_from_file(input_file, skip_existing=True):
     """
     从文本文件中读取蛋白质名称和轮廓阈值，逐行处理。
 
@@ -215,6 +148,7 @@ def process_from_file(input_file):
 
     参数:
     - input_file (str): 文本文件的路径。
+    - skip_existing (bool): 如果为True，当目标processed文件夹已存在时跳过处理。
 
     返回:
     - None
@@ -228,8 +162,10 @@ def process_from_file(input_file):
     # 跟踪成功和失败的处理
     success_count = 0
     failure_count = 0
+    skip_count = 0
     proteins_processed = []
     proteins_failed = []
+    proteins_skipped = []
 
     with open(input_file, 'r') as file:
         lines = file.readlines()
@@ -252,9 +188,48 @@ def process_from_file(input_file):
                     contour_level = 0.0  # 默认轮廓阈值
                 
                 print(f"\nProcessing {idx+1}/{total_lines}: {protein_name} (contour: {contour_level})")
-                process_protein(protein_name, contour_level)
-                success_count += 1
-                proteins_processed.append(protein_name)
+                
+                # 检查processed文件夹是否已存在（不在此处检查，让process_protein函数处理）
+                base_path = r"/zhaoxuanj/FinialPDB"
+                input_folder = os.path.join(base_path, f"PDB-{protein_name.lower()}-EMD-*")
+                matching_folders = glob.glob(input_folder)
+                
+                if matching_folders and skip_existing:
+                    folder = matching_folders[0]
+                    processed_path = os.path.join(folder, "processed")
+                    if os.path.exists(processed_path):
+                        print(f"Processed folder already exists for {protein_name}, checking if process is needed...")
+                        # 如果文件夹存在但为空或不完整，仍然进行处理
+                        files = os.listdir(processed_path) if os.path.exists(processed_path) else []
+                        if files and any(f.endswith('_segment.mrc') for f in files):
+                            print(f"Found complete processed files for {protein_name}, skipping...")
+                            skip_count += 1
+                            proteins_skipped.append(protein_name)
+                            continue
+                
+                # 处理蛋白质
+                process_protein(protein_name, contour_level, skip_existing)
+                
+                # 重新检查是否已成功处理（processed文件夹是否存在且不为空）
+                if matching_folders:
+                    folder = matching_folders[0]
+                    processed_path = os.path.join(folder, "processed")
+                    if os.path.exists(processed_path):
+                        files = os.listdir(processed_path)
+                        if files:
+                            success_count += 1
+                            proteins_processed.append(protein_name)
+                        else:
+                            print(f"Warning: Processed folder is empty for {protein_name}")
+                            failure_count += 1
+                            proteins_failed.append(protein_name)
+                    else:
+                        failure_count += 1
+                        proteins_failed.append(protein_name)
+                else:
+                    failure_count += 1
+                    proteins_failed.append(protein_name)
+                
             except Exception as e:
                 print(f"Error processing line '{line}': {str(e)}")
                 failure_count += 1
@@ -265,11 +240,17 @@ def process_from_file(input_file):
     print("\n=== Processing Summary ===")
     print(f"Total proteins: {total_lines}")
     print(f"Successfully processed: {success_count}")
+    print(f"Skipped: {skip_count}")
     print(f"Failed: {failure_count}")
     
     if proteins_processed:
         print("\nProcessed proteins:")
         for protein in proteins_processed:
+            print(f"  - {protein}")
+    
+    if proteins_skipped:
+        print("\nSkipped proteins (already processed):")
+        for protein in proteins_skipped:
             print(f"  - {protein}")
     
     if proteins_failed:
@@ -289,9 +270,13 @@ if __name__ == "__main__":
     parser.add_argument("--info_txt", type=str, 
                       default=r"/defaultShare/zcan-library/Diffmodeler_data/20250306dataset/20250306contour_level.txt",
                       help="Path to the input .txt file containing protein names and contour levels.")
+    parser.add_argument("--skip_existing", action="store_true", default=True,
+                      help="Skip processing if the processed folder already exists (default: True)")
+    parser.add_argument("--no_skip", dest="skip_existing", action="store_false",
+                      help="Do not skip processing even if the processed folder exists")
 
     # 解析参数
     args = parser.parse_args()
 
     # 从文件中读取并处理
-    process_from_file(args.info_txt)
+    process_from_file(args.info_txt, args.skip_existing)

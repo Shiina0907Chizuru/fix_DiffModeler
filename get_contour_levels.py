@@ -20,10 +20,10 @@ print("WebDriver initialized.")
 
 # txt 文件路径
 # pdb_list_file = "E:/ZJUT/Research/MrZhouDeepLearning/DiffReaserch/DiffModeler_data/newdateset/pdb_ids.txt"
-pdb_list_file = "c:/Users/Z/Desktop/20250306.txt"
+pdb_list_file = "c:/Users/Z/Desktop/20250315.txt"
 
 # 保存 contour level 值的 txt 文件路径
-output_file_path = "20250306contour_level.txt"
+output_file_path = "20250315contour_level.txt"
 
 # 读取 PDB ID 列表
 with open(pdb_list_file, "r") as f:

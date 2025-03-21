@@ -391,13 +391,15 @@ def generate_backbone_density(input_file, output_mrc, resolution=1.0, backbone_o
 
 def process_data_directory(data_root, protein_info_file, segment_pattern="{pdb_id}_segment.mrc", force_regenerate=False):
     """
-    处理数据目录，为每个蛋白质生成骨架密度图
+    批量处理数据目录中的所有蛋白质，生成骨架密度图。
     
-    Args:
-        data_root (str): 数据根目录，包含所有蛋白质子目录
-        protein_info_file (str): 蛋白质信息文件路径
-        segment_pattern (str, optional): 参考密度图文件名模式，用于查找segment map
-        force_regenerate (bool, optional): 如果为True，则即使输出文件已存在也重新生成
+    每个蛋白质目录应该有格式：PDB-{pdb_id}-EMD-{emd_id}
+    
+    参数:
+    - data_root (str): 数据根目录，包含所有蛋白质子目录
+    - protein_info_file (str): 包含蛋白质信息（EMD ID、轮廓级别和分辨率）的文本文件
+    - segment_pattern (str): 参考密度图文件名模式
+    - force_regenerate (bool): 是否强制重新生成骨架密度图，即使输出文件已存在
     """
     # 解析蛋白质信息文件
     protein_info = parse_protein_info_file(protein_info_file)
@@ -432,11 +434,20 @@ def process_data_directory(data_root, protein_info_file, segment_pattern="{pdb_i
             # 设置输出文件路径
             output_path = os.path.join(processed_dir, f"{pdb_id}_backbone.mrc")
             
-            # 检查输出文件是否已存在
-            if os.path.exists(output_path) and not force_regenerate:
-                print(f"跳过 {pdb_id} (EMD-{emd_id})：骨架密度图已存在")
-                skip_count += 1
-                continue
+            # 改进的检测逻辑: 检查processed文件夹中是否存在{pdb_id}_backbone.mrc文件
+            if not force_regenerate:
+                # 检查输出文件是否已存在
+                if os.path.exists(output_path):
+                    print(f"跳过 {pdb_id} (EMD-{emd_id})：骨架密度图已存在")
+                    skip_count += 1
+                    continue
+                    
+                # 检查processed目录中是否存在任何*_backbone.mrc文件
+                backbone_files = glob.glob(os.path.join(processed_dir, "*_backbone.mrc"))
+                if backbone_files:
+                    print(f"跳过 {pdb_id} (EMD-{emd_id})：在processed目录中找到已有骨架密度图: {os.path.basename(backbone_files[0])}")
+                    skip_count += 1
+                    continue
             
             # 查找pdb或cif文件 - 支持多种命名模式
             possible_patterns = [

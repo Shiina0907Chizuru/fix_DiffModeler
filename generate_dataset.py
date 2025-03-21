@@ -165,13 +165,17 @@ def process_from_file(input_file):
 """
 
 # 新版本的函数
-def process_from_file(input_file):
+def process_from_file(input_file, skip_existing=True):
     """
     从文本文件中读取蛋白质信息并生成数据集。
     适配新的目录结构版本。
+    
+    Args:
+        input_file (str): 包含蛋白质名称和等值面水平的文本文件路径
+        skip_existing (bool): 是否跳过已有backbone_Dataset文件夹的蛋白质，默认为True
     """
     # base_path = r"E:\ZJUT\Research\MrZhouDeepLearning\DiffReaserch\DiffModeler_data\newdateset\trainpdb_emdb_data"
-    base_path = r"/defaultShare/zcan-library/Diffmodeler_data/20250306dataset/origin"
+    base_path = r"/zhaoxuanj/FinialPDB"
 
     with open(input_file, 'r') as file:
         for line in file:
@@ -197,9 +201,14 @@ def process_from_file(input_file):
                 input_map_path = os.path.join(protein_dir, "processed", f"{protein_name}_segment.mrc")
                 label_map_path = os.path.join(protein_dir, "processed", f"{protein_name}_backbone.mrc")
                 save_dir = os.path.join(protein_dir, "backbone_Dataset")
+                
+                # 检查是否已有backbone_Dataset文件夹，如果有且skip_existing为True，就跳过该蛋白质
+                if skip_existing and os.path.exists(save_dir):
+                    print(f"检测到已有数据集文件夹，跳过处理: {save_dir}")
+                    continue
 
                 # 确保输出目录存在
-                os.makedirs(save_dir, exist_ok=True)
+                mkdir(save_dir)
 
                 print(f"Processing {protein_name}...")
                 print(f"Input map: {input_map_path}")
@@ -216,7 +225,9 @@ def process_from_file(input_file):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Generate datasets for protein structures.")
+    parser = argparse.ArgumentParser(description='Generate protein backbone datasets from map files.')
     parser.add_argument("--info_txt", type=str, required=True, help="Path to the input text file containing protein names and contour levels.")
+    parser.add_argument("--skip_existing", action="store_true", default=True, help="跳过已有backbone_Dataset文件夹的蛋白质（默认行为）")
+    parser.add_argument("--no_skip", dest="skip_existing", action="store_false", help="不跳过已有backbone_Dataset文件夹的蛋白质，强制重新生成")
     args = parser.parse_args()
-    process_from_file(args.info_txt)
+    process_from_file(args.info_txt, args.skip_existing)

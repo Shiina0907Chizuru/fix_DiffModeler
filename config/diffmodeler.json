@@ -7,7 +7,7 @@
     "db_exp_path": "data/rcsb.db",
     "db_path": "data/rcsb_afdb.db",//for server usage, remove dependency on EBI's API
     "model": {
-      "path": "C:\\Users\\Z\\Desktop\\checkpoint.pth.tar",
+      "path": "C:\\Users\\Z\\Desktop\\model26.pth.tar",
       "unet": {
             "network_type": "umlp3d", 
             "in_channel": 3,
