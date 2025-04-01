@@ -23,3 +23,5 @@ python $WORKDIR/tools/generate_backbone_map.py --batch --data-root /zhaoxuanj/Fi
 echo "generate_backbone_map.py 运行完成"
 
 echo "====== 自动化处理完成 $(date) ======"
+# chmod +x process_and_generate.sh
+# ./process_and_generate.sh
