@@ -71,14 +71,17 @@ def get_lattice_meshgrid_np(shape_size, no_shift=False):
     )
     return mesh
 
-def grid_to_points(grid, threshold, neighbour_distance_threshold):
+def grid_to_points(grid, threshold=0.5, neighbour_distance_threshold=3.8, output_dir=None, voxel_size=None, global_origin=None):
     """
-    从密度网格中提取点云，使用CryFold原始方法
+    将密度网格转换为点云，使用CryFold中的均值漂移方法处理
     
     参数:
     - grid: 密度网格
     - threshold: 密度阈值
     - neighbour_distance_threshold: 邻居距离阈值
+    - output_dir: 输出目录，用于保存点集密度图
+    - voxel_size: 体素大小，用于保存密度图
+    - global_origin: 全局原点，用于保存密度图
     
     返回:
     - output_points: 经过处理后的点云
@@ -135,6 +138,38 @@ def grid_to_points(grid, threshold, neighbour_distance_threshold):
     
     print(f"提取了{len(output_points)}个点 (从原始的{len(output_points_before_pruning)}个点中)")
     
+    # 将点集转换为密度图并保存
+    if output_dir is not None and voxel_size is not None and global_origin is not None:
+        try:
+            # 点集转密度图函数
+            def points_to_grid(points, shape):
+                """将点集转换为密度图"""
+                density_grid = np.zeros(shape, dtype=np.float32)
+                for point in points:
+                    i, j, k = np.round(point).astype(int)
+                    if 0 <= i < shape[0] and 0 <= j < shape[1] and 0 <= k < shape[2]:
+                        density_grid[i, j, k] = 1.0
+                return density_grid
+                
+            # 保存处理前的点集密度图
+            if len(output_points_before_pruning) > 0:
+                before_pruning_grid = points_to_grid(output_points_before_pruning, grid.shape)
+                before_pruning_path = os.path.join(output_dir, "points_before_pruning.mrc")
+                save_dens_map(before_pruning_path, before_pruning_grid, voxel_size, global_origin)
+                print(f"已保存处理前点集密度图: {before_pruning_path}")
+            
+            # 保存处理后的点集密度图
+            if len(output_points) > 0:
+                after_pruning_grid = points_to_grid(output_points, grid.shape)
+                after_pruning_path = os.path.join(output_dir, "points_after_pruning.mrc")
+                save_dens_map(after_pruning_path, after_pruning_grid, voxel_size, global_origin)
+                print(f"已保存处理后点集密度图: {after_pruning_path}")
+                
+        except Exception as e:
+            print(f"保存点集密度图时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
     return output_points, output_points_before_pruning
 
 def points_to_pdb(path_to_save, points):
@@ -158,7 +193,7 @@ def points_to_pdb(path_to_save, points):
     for i, point in enumerate(points):
         struct.set_line_counter(i)
         # 使用标准的氨基酸命名和编号，从1开始
-        struct.init_residue("ALA", " ", i, " ")  # 残基编号从1开始
+        struct.init_residue(f"ALA", " ", i, " ")  # 残基编号从1开始
         # 设置原子
         struct.init_atom("CA", point, 0, 1, " ", "CA", "C")
     
@@ -201,14 +236,14 @@ def create_cryfold_input(input_mrc, output_dir, threshold=0.5, min_distance=3.8)
     
     # 按照CryFold方式从网格提取点云
     neighbour_distance_threshold = 6 / np.min(voxel_size)  # 与CryFold使用相同的邻居距离计算
-    ca_coords, ca_coords_before_pruning = grid_to_points(density, threshold, neighbour_distance_threshold)
+    ca_coords, ca_coords_before_pruning = grid_to_points(density, threshold, neighbour_distance_threshold, see_alpha_dir, voxel_size, origin)
     
     # 如果没有检测到任何点，尝试降低阈值
     if len(ca_coords) == 0:
         print("警告: 未检测到任何CA原子! 尝试降低阈值...")
         for reduced_threshold in [0.4, 0.3, 0.2, 0.1, 0.05, 0.01]:
             print(f"尝试阈值: {reduced_threshold}")
-            ca_coords, ca_coords_before_pruning = grid_to_points(density, reduced_threshold, neighbour_distance_threshold)
+            ca_coords, ca_coords_before_pruning = grid_to_points(density, reduced_threshold, neighbour_distance_threshold, see_alpha_dir, voxel_size, origin)
             if len(ca_coords) > 0:
                 print(f"使用阈值 {reduced_threshold} 成功检测到 {len(ca_coords)} 个CA原子")
                 break
@@ -237,6 +272,69 @@ def create_cryfold_input(input_mrc, output_dir, threshold=0.5, min_distance=3.8)
     print(f"  python -m CryFold.CryNet.inference --fasta <序列文件> --struct {output_cif} --map-path <密度图文件> --output-dir <输出目录>")
     
     return output_cif
+
+def save_dens_map(save_map_path, new_dens, current_voxel_size, current_origin):
+    """
+    保存密度图为MRC文件，使用当前的体素大小和原点
+    
+    参数：
+    save_map_path: 保存路径
+    new_dens: 新的密度图数据（预测结果）
+    current_voxel_size: 当前体素大小
+    current_origin: 当前全局原点
+    """
+    data_new = np.float32(new_dens)
+    
+    # 创建新的MRC文件
+    with mrcfile.new(save_map_path, overwrite=True) as mrc_new:
+        # 设置数据
+        mrc_new.set_data(data_new)
+        
+        # 设置体素大小
+        vsize = mrc_new.voxel_size
+        vsize.flags.writeable = True
+        
+        # 确保体素大小是float类型
+        if isinstance(current_voxel_size, np.ndarray):
+            if current_voxel_size.size >= 3:
+                vsize.x = float(current_voxel_size[0])
+                vsize.y = float(current_voxel_size[1])
+                vsize.z = float(current_voxel_size[2])
+            elif current_voxel_size.size == 1:
+                vs_value = float(current_voxel_size.item())
+                vsize.x = vs_value
+                vsize.y = vs_value
+                vsize.z = vs_value
+        else:
+            vsize.x = float(current_voxel_size)
+            vsize.y = float(current_voxel_size)
+            vsize.z = float(current_voxel_size)
+        
+        mrc_new.voxel_size = vsize
+        
+        # 设置原点
+        if isinstance(current_origin, np.ndarray):
+            if current_origin.size >= 3:
+                mrc_new.header.origin.x = float(current_origin[0])
+                mrc_new.header.origin.y = float(current_origin[1])
+                mrc_new.header.origin.z = float(current_origin[2])
+            elif current_origin.size == 1:
+                orig_value = float(current_origin.item())
+                mrc_new.header.origin.x = orig_value
+                mrc_new.header.origin.y = orig_value
+                mrc_new.header.origin.z = orig_value
+        else:
+            mrc_new.header.origin.x = float(current_origin)
+            mrc_new.header.origin.y = float(current_origin)
+            mrc_new.header.origin.z = float(current_origin)
+        
+        # 设置标准轴排列
+        mrc_new.header.mapc = 1  # 按照标准约定: mapc=1, mapr=2, maps=3
+        mrc_new.header.mapr = 2
+        mrc_new.header.maps = 3
+        
+        # 更新头部统计信息
+        mrc_new.update_header_stats()
 
 def main():
     args = parse_args()
