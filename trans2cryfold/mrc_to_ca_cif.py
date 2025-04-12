@@ -17,6 +17,8 @@ def parse_args():
     parser.add_argument("--output_dir", required=True, help="输出目录")
     parser.add_argument("--threshold", type=float, default=0.5, help="密度阈值")
     parser.add_argument("--min_distance", type=float, default=3.8, help="最小CA原子间距（埃）")
+    parser.add_argument("--use_fps", action="store_true", help="是否使用最远点取样")
+    parser.add_argument("--n_samples", type=int, default=1000, help="最远点取样的采样点数量")
     return parser.parse_args()
 
 def load_mrc(mrc_path):
@@ -71,7 +73,37 @@ def get_lattice_meshgrid_np(shape_size, no_shift=False):
     )
     return mesh
 
-def grid_to_points(grid, threshold=0.5, neighbour_distance_threshold=3.8, output_dir=None, voxel_size=None, global_origin=None):
+def farthest_point_sampling(points, n_samples):
+    """
+    最远点取样算法(FPS)，用于点云下采样
+    
+    参数:
+    - points: 输入点云 (N x 3)
+    - n_samples: 采样点数量
+    
+    返回:
+    - sampled_points: 采样后的点云 (n_samples x 3)
+    """
+    # 如果点数少于请求的采样数，直接返回所有点
+    n_points = len(points)
+    if n_points <= n_samples:
+        return points
+        
+    # 初始化距离矩阵和第一个采样点（随机选择）
+    indices = np.zeros(n_samples, dtype=np.int32)
+    indices[0] = np.random.randint(n_points)
+    distances = np.sum((points - points[indices[0]])**2, axis=1)
+    
+    # 迭代选择最远点
+    for i in range(1, n_samples):
+        indices[i] = np.argmax(distances)
+        # 更新距离
+        new_distances = np.sum((points - points[indices[i]])**2, axis=1)
+        distances = np.minimum(distances, new_distances)
+    
+    return points[indices]
+
+def grid_to_points(grid, threshold=0.5, neighbour_distance_threshold=3.8, output_dir=None, voxel_size=None, global_origin=None, use_fps=False, n_samples=1000):
     """
     将密度网格转换为点云，使用CryFold中的均值漂移方法处理
     
@@ -82,6 +114,8 @@ def grid_to_points(grid, threshold=0.5, neighbour_distance_threshold=3.8, output
     - output_dir: 输出目录，用于保存点集密度图
     - voxel_size: 体素大小，用于保存密度图
     - global_origin: 全局原点，用于保存密度图
+    - use_fps: 是否使用最远点取样
+    - n_samples: 最远点取样的采样点数量
     
     返回:
     - output_points: 经过处理后的点云
@@ -135,6 +169,12 @@ def grid_to_points(grid, threshold=0.5, neighbour_distance_threshold=3.8, output
     points = points[~np.isnan(points).any(axis=-1)].reshape(-1, 3)
 
     output_points = points
+    
+    # 应用最远点取样
+    if use_fps and len(output_points) > n_samples:
+        points_before_fps = len(output_points)
+        output_points = farthest_point_sampling(output_points, n_samples)
+        print(f"应用最远点取样后，点数从{points_before_fps}减少到{len(output_points)}")
     
     print(f"提取了{len(output_points)}个点 (从原始的{len(output_points_before_pruning)}个点中)")
     
@@ -207,7 +247,7 @@ def points_to_pdb(path_to_save, points):
     
     print(f"成功保存CIF文件到: {path_to_save}")
 
-def create_cryfold_input(input_mrc, output_dir, threshold=0.5, min_distance=3.8):
+def create_cryfold_input(input_mrc, output_dir, threshold=0.5, min_distance=3.8, use_fps=False, n_samples=1000):
     """
     将DiffModeler生成的骨架MRC转换为CryFold第二阶段所需的CIF文件
     
@@ -216,6 +256,8 @@ def create_cryfold_input(input_mrc, output_dir, threshold=0.5, min_distance=3.8)
     - output_dir: 输出目录
     - threshold: 密度阈值
     - min_distance: 最小Cα原子间距（埃）
+    - use_fps: 是否使用最远点取样
+    - n_samples: 最远点取样的采样点数量
     
     返回:
     - 输出CIF文件的路径
@@ -236,14 +278,14 @@ def create_cryfold_input(input_mrc, output_dir, threshold=0.5, min_distance=3.8)
     
     # 按照CryFold方式从网格提取点云
     neighbour_distance_threshold = 6 / np.min(voxel_size)  # 与CryFold使用相同的邻居距离计算
-    ca_coords, ca_coords_before_pruning = grid_to_points(density, threshold, neighbour_distance_threshold, see_alpha_dir, voxel_size, origin)
+    ca_coords, ca_coords_before_pruning = grid_to_points(density, threshold, neighbour_distance_threshold, see_alpha_dir, voxel_size, origin, use_fps, n_samples)
     
     # 如果没有检测到任何点，尝试降低阈值
     if len(ca_coords) == 0:
         print("警告: 未检测到任何CA原子! 尝试降低阈值...")
         for reduced_threshold in [0.4, 0.3, 0.2, 0.1, 0.05, 0.01]:
             print(f"尝试阈值: {reduced_threshold}")
-            ca_coords, ca_coords_before_pruning = grid_to_points(density, reduced_threshold, neighbour_distance_threshold, see_alpha_dir, voxel_size, origin)
+            ca_coords, ca_coords_before_pruning = grid_to_points(density, reduced_threshold, neighbour_distance_threshold, see_alpha_dir, voxel_size, origin, use_fps, n_samples)
             if len(ca_coords) > 0:
                 print(f"使用阈值 {reduced_threshold} 成功检测到 {len(ca_coords)} 个CA原子")
                 break
@@ -342,7 +384,9 @@ def main():
         args.input, 
         args.output_dir, 
         args.threshold, 
-        args.min_distance
+        args.min_distance,
+        args.use_fps,
+        args.n_samples
     )
 
 if __name__ == "__main__":
