@@ -149,36 +149,95 @@ class KANLinear3D(nn.Module):
         )
         return bases.contiguous()
 
+    # def curve2coeff(self, x: torch.Tensor, y: torch.Tensor):
+    #     """
+    #     Compute the coefficients of the curve that interpolates the given points.
+
+    #     Args:
+    #         x (torch.Tensor): Input tensor of shape (batch_size, in_features).
+    #         y (torch.Tensor): Output tensor of shape (batch_size, in_features, out_features).
+
+    #     Returns:
+    #         torch.Tensor: Coefficients tensor of shape (out_features, in_features, grid_size + spline_order).
+    #     """
+    #     assert x.dim() == 2 and x.size(1) == self.in_features
+    #     assert y.size() == (x.size(0), self.in_features, self.out_features)
+
+    #     A = self.b_splines(x).transpose(
+    #         0, 1
+    #     )  # (in_features, batch_size, grid_size + spline_order)
+    #     B = y.transpose(0, 1)  # (in_features, batch_size, out_features)
+    #     # 添加正则化参数rcond，提高数值稳定性，解决在某些硬件环境下计算卡住的问题
+    #     solution = torch.linalg.lstsq(
+    #         A, B, rcond=1e-4
+    #     ).solution  # (in_features, grid_size + spline_order, out_features)
+    #     result = solution.permute(
+    #         2, 0, 1
+    #     )  # (out_features, in_features, grid_size + spline_order)
+
+    #     assert result.size() == (
+    #         self.out_features,
+    #         self.in_features,
+    #         self.grid_size + self.spline_order,
+    #     )
+    #     return result.contiguous()
     def curve2coeff(self, x: torch.Tensor, y: torch.Tensor):
         """
         Compute the coefficients of the curve that interpolates the given points.
-
+        
         Args:
             x (torch.Tensor): Input tensor of shape (batch_size, in_features).
             y (torch.Tensor): Output tensor of shape (batch_size, in_features, out_features).
-
+            
         Returns:
             torch.Tensor: Coefficients tensor of shape (out_features, in_features, grid_size + spline_order).
         """
         assert x.dim() == 2 and x.size(1) == self.in_features
         assert y.size() == (x.size(0), self.in_features, self.out_features)
-
-        A = self.b_splines(x).transpose(
-            0, 1
-        )  # (in_features, batch_size, grid_size + spline_order)
-        B = y.transpose(0, 1)  # (in_features, batch_size, out_features)
-        solution = torch.linalg.lstsq(
-            A, B
-        ).solution  # (in_features, grid_size + spline_order, out_features)
-        result = solution.permute(
-            2, 0, 1
-        )  # (out_features, in_features, grid_size + spline_order)
-
+        
+        # 获取当前设备
+        device = x.device
+        
+        # 确保数据类型一致，提高数值稳定性
+        A = self.b_splines(x).transpose(0, 1).to(device, dtype=torch.float32)
+        B = y.transpose(0, 1).to(device, dtype=torch.float32)
+        
+        # 方法1: 尝试使用替代的最小二乘求解方法
+        try:
+            # 添加少量正则化以提高稳定性
+            eps = 1e-8
+            A_reg = A.clone()
+            
+            # 仅对对角线元素添加小值提高稳定性
+            diag_indices = torch.arange(min(A_reg.shape[-2], A_reg.shape[-1]), device=device)
+            for i in range(A_reg.shape[0]):
+                A_reg[i, diag_indices, diag_indices] += eps
+                
+            # 使用正则化后的矩阵求解
+            solution = torch.linalg.lstsq(A_reg, B, driver='gels').solution
+        
+        except (RuntimeError, AttributeError):
+            # 方法2: 如果失败，使用计算 A^T·A 和 A^T·B 的方式
+            AT = A.transpose(-1, -2)
+            ATA = torch.matmul(AT, A)
+            
+            # 添加正则化
+            diag_indices = torch.arange(ATA.shape[-1], device=device)
+            for i in range(ATA.shape[0]):
+                ATA[i, diag_indices, diag_indices] += eps
+                
+            ATB = torch.matmul(AT, B)
+            solution = torch.linalg.solve(ATA, ATB)
+        
+        # 重新排列张量维度
+        result = solution.permute(2, 0, 1)
+        
         assert result.size() == (
             self.out_features,
             self.in_features,
             self.grid_size + self.spline_order,
         )
+        
         return result.contiguous()
 
     def forward(self, x: torch.Tensor):
