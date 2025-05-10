@@ -108,10 +108,10 @@ def set_up_environment(params):
         cur_map_path = increase_map_density(cur_map_path, os.path.join(save_path, map_name+"_increase.mrc"), params['contour'])
         params['contour'] = 0
     
-    # Segment map
+    # Segment map - 使用传入的contour参数而不是固定为0
     from modeling.map_utils import segment_map
     new_map_path = os.path.join(save_path, map_name + "_segment.mrc")
-    segment_map(cur_map_path, new_map_path, contour=0)
+    segment_map(cur_map_path, new_map_path, contour=params['contour'])
     
     return save_path, new_map_path
 
@@ -190,11 +190,36 @@ def process_single_map(map_file, params, running_dir):
     """处理单个密度图文件"""
     print(f"\n正在处理: {map_file}")
     
-    # 设置环境
-    save_path, processed_map_path = set_up_environment(params)
-    if save_path is None:
-        print(f"跳过处理 {map_file}: 不支持的分辨率")
-        return
+    # 检查是否已有处理过的segment文件
+    map_dir = os.path.dirname(map_file)
+    processed_dir = os.path.join(map_dir, "processed")
+    map_name = os.path.splitext(os.path.basename(map_file))[0]
+    
+    existing_segment = None
+    if os.path.exists(processed_dir):
+        segment_files = glob.glob(os.path.join(processed_dir, "*_segment.mrc"))
+        if segment_files:
+            existing_segment = segment_files[0]
+            print(f"找到已有的segment文件: {existing_segment}")
+    
+    # 输出目录设置
+    save_path, map_name = init_save_path(map_file, params['output'])
+    save_path = os.path.abspath(save_path)
+    
+    if existing_segment:
+        # 直接使用现有的segment文件，跳过预处理
+        processed_map_path = os.path.join(save_path, map_name + "_segment.mrc")
+        # 确保目录存在
+        os.makedirs(os.path.dirname(processed_map_path), exist_ok=True)
+        # 复制segment文件到输出目录
+        shutil.copy(existing_segment, processed_map_path)
+        print(f"使用现有的segment文件，已复制到: {processed_map_path}")
+    else:
+        # 没有现有文件，执行正常的预处理流程
+        save_path, processed_map_path = set_up_environment(params)
+        if save_path is None:
+            print(f"跳过处理 {map_file}: 不支持的分辨率")
+            return None
     
     # 运行扩散追踪骨架
     backbone_map_path = diffusion_trace_map(save_path, processed_map_path, params)

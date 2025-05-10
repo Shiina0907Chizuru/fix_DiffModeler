@@ -110,10 +110,10 @@ def set_up_environment(params):
         cur_map_path = increase_map_density(cur_map_path, os.path.join(save_path, map_name+"_increase.mrc"), params['contour'])
         params['contour'] = 0
     
-    # Segment map
+    # Segment map - 使用传入的contour参数而不是固定为0
     from modeling.map_utils import segment_map
     new_map_path = os.path.join(save_path, map_name + "_segment.mrc")
-    segment_map(cur_map_path, new_map_path, contour=0)
+    segment_map(cur_map_path, new_map_path, contour=params['contour'])
     
     return save_path, new_map_path
 
